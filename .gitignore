@@ -1,0 +1,6 @@
+bin/
+dist/
+.claude/skills
+.claude/epics
+.claude/prds
+aim.local.yaml

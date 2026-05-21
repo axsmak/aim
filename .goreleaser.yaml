@@ -1,0 +1,65 @@
+version: 2
+
+project_name: aiman
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: aiman
+    main: ./cmd/aim
+    binary: aiman
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: aiman
+    ids:
+      - aiman
+    name_template: "aiman_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - name: aiman
+    repository:
+      owner: axsmak
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/axsmak/aim"
+    description: "Agent Inventory Manager — manage AI agent skills and MCP servers across Claude Code, Cursor, Codex"
+    license: "Apache-2.0"
+    install: |
+      bin.install "aiman"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/aiman --version")
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "chore: brew formula update for {{ .ProjectName }} version {{ .Tag }}"
