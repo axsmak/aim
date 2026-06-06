@@ -303,6 +303,37 @@ func TestCursorAdapter_InstallMCP_CreatesMCPJSON(t *testing.T) {
 	}
 }
 
+func TestCursorAdapter_InstallMCP_EmptyMCPJSON(t *testing.T) {
+	// Cursor creates mcp.json as an empty file before the user configures anything.
+	// installMCPJSON must tolerate this instead of failing with "unexpected end of JSON input".
+	home := t.TempDir()
+	baseDir := filepath.Join(home, ".cursor")
+	if err := os.Mkdir(baseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "mcp.json"), []byte{}, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := adapter.NewCursorAdapter("")
+	mcpItem := mcp.MCP{
+		Name:    "my-server",
+		Command: "node",
+		Args:    []string{"srv.js"},
+		Targets: []string{"cursor"},
+		Env:     []mcp.EnvVar{},
+	}
+	if err := a.InstallMCP(mcpItem, baseDir, nil); err != nil {
+		t.Fatalf("InstallMCP() on empty mcp.json: %v", err)
+	}
+
+	cfg := readJSONFile(t, filepath.Join(baseDir, "mcp.json"))
+	servers := cfg["mcpServers"].(map[string]interface{})
+	if _, ok := servers["my-server"]; !ok {
+		t.Error("my-server not written to mcp.json")
+	}
+}
+
 func TestRegistry(t *testing.T) {
 	adapters := adapter.Registry()
 	if len(adapters) == 0 {

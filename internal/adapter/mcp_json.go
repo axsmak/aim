@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -97,6 +98,9 @@ func readJSONConfig(path string) (map[string]interface{}, error) {
 			return map[string]interface{}{}, nil
 		}
 		return nil, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return map[string]interface{}{}, nil
 	}
 	var cfg map[string]interface{}
 	if err := json.Unmarshal(data, &cfg); err != nil {
