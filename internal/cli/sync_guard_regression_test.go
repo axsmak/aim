@@ -303,6 +303,114 @@ func TestSyncBlocksDivergedHistory(t *testing.T) {
 	}
 }
 
+// TestSyncPreservesNewSkillWhenRemoteAhead is the regression test for issue #122.
+//
+// Before the fix: sync blocked with "untracked files in managed paths" whenever
+// the user had a new (untracked) skill file, even though git reset --hard is safe
+// for non-conflicting untracked files.
+//
+// After the fix: sync succeeds and the new untracked skill file is preserved.
+func TestSyncPreservesNewSkillWhenRemoteAhead(t *testing.T) {
+	bareURL := setupGitSource(t)
+
+	fakeHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(fakeHome, ".claude"), 0755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	workDir := t.TempDir()
+
+	// init + sync
+	if _, _, err := runAimCmd(t, fakeHome, workDir, "init", "--path", workDir, bareURL); err != nil {
+		t.Fatalf("aiman init: %v", err)
+	}
+	if _, _, err := runSyncCmd(t, fakeHome, workDir); err != nil {
+		t.Fatalf("aiman sync (initial): %v", err)
+	}
+
+	// Another machine pushes a new commit to origin
+	srcWork := t.TempDir()
+	runGitHelper(t, "", "clone", bareURL, srcWork)
+	runGitHelper(t, srcWork, "config", "user.email", "test@test.com")
+	runGitHelper(t, srcWork, "config", "user.name", "Test")
+	remoteSkill := filepath.Join(srcWork, "skills", "remote-added.md")
+	if err := os.WriteFile(remoteSkill, []byte("---\nname: remote-added\ndescription: From another machine\n---\n\n# Role\nRemote.\n"), 0644); err != nil {
+		t.Fatalf("write remote skill: %v", err)
+	}
+	runGitHelper(t, srcWork, "add", ".")
+	runGitHelper(t, srcWork, "commit", "-m", "add remote skill")
+	runGitHelper(t, srcWork, "push", "origin", "main")
+
+	// User creates a new local skill (untracked, no conflict with remote)
+	newSkillPath := filepath.Join(workDir, "skills", "my-new-local.md")
+	if err := os.WriteFile(newSkillPath, []byte("---\nname: my-new-local\ndescription: Created locally\n---\n\n# Role\nLocal.\n"), 0644); err != nil {
+		t.Fatalf("write local skill: %v", err)
+	}
+
+	// aiman sync must succeed — remote is ahead but untracked file does not conflict
+	_, stderr, err := runSyncCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Errorf("aiman sync failed despite non-conflicting untracked skill (issue #122 regression): %v\nstderr: %s", err, stderr)
+	}
+
+	// The new local skill must still be on disk
+	if _, statErr := os.Stat(newSkillPath); statErr != nil {
+		t.Errorf("new local skill was deleted by sync (data loss regression): %v", statErr)
+	}
+}
+
+// TestSyncBlocksUntrackedConflictingWithOriginMain verifies that aiman sync fails
+// with a clear error when an untracked file would be overwritten by git reset --hard.
+func TestSyncBlocksUntrackedConflictingWithOriginMain(t *testing.T) {
+	bareURL := setupGitSource(t)
+
+	fakeHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(fakeHome, ".claude"), 0755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	workDir := t.TempDir()
+
+	// init + sync
+	if _, _, err := runAimCmd(t, fakeHome, workDir, "init", "--path", workDir, bareURL); err != nil {
+		t.Fatalf("aiman init: %v", err)
+	}
+	if _, _, err := runSyncCmd(t, fakeHome, workDir); err != nil {
+		t.Fatalf("aiman sync (initial): %v", err)
+	}
+
+	// Another machine pushes a file named conflict.md
+	srcWork := t.TempDir()
+	runGitHelper(t, "", "clone", bareURL, srcWork)
+	runGitHelper(t, srcWork, "config", "user.email", "test@test.com")
+	runGitHelper(t, srcWork, "config", "user.name", "Test")
+	conflictSkill := filepath.Join(srcWork, "skills", "conflict.md")
+	if err := os.WriteFile(conflictSkill, []byte("---\nname: conflict\ndescription: Remote version\n---\n\n# Role\nRemote.\n"), 0644); err != nil {
+		t.Fatalf("write conflict skill on remote: %v", err)
+	}
+	runGitHelper(t, srcWork, "add", ".")
+	runGitHelper(t, srcWork, "commit", "-m", "add conflict skill")
+	runGitHelper(t, srcWork, "push", "origin", "main")
+
+	// Locally, user has an untracked file with the SAME name
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "conflict.md"), []byte("local version"), 0644); err != nil {
+		t.Fatalf("write local conflict file: %v", err)
+	}
+
+	// aiman sync must fail with a message about the conflict
+	_, stderr, err := runSyncCmd(t, fakeHome, workDir)
+	if err == nil {
+		t.Fatal("expected aiman sync to fail when untracked file conflicts with remote, got success")
+	}
+	combined := err.Error() + " " + stderr
+	if !strings.Contains(combined, "overwritten") {
+		t.Errorf("expected 'overwritten' in error message, got: %v / stderr: %s", err, stderr)
+	}
+	if !strings.Contains(combined, "conflict.md") {
+		t.Errorf("expected conflict file name in error, got: %v / stderr: %s", err, stderr)
+	}
+}
+
 // TestStatusUsesActiveRepoNotCwd verifies that aiman status uses the active repo
 // from global config (set by aiman switch), NOT the current working directory.
 // Before the fix, running aiman status from an alien cwd (that is not a git repo)

@@ -57,7 +57,10 @@ func (f *fakeGitOps) IsAncestor(dir, ancestor, descendant string) (bool, error) 
 }
 func (f *fakeGitOps) HasDirtyWorktree(dir string) (bool, error)                    { return false, nil }
 func (f *fakeGitOps) HasUntrackedInPaths(dir string, paths []string) (bool, error) { return false, nil }
-func (f *fakeGitOps) CountAheadBehind(dir, base, ref string) (int, int, error)     { return 0, 0, nil }
+func (f *fakeGitOps) UntrackedConflictsWithRef(dir, ref string, paths []string) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeGitOps) CountAheadBehind(dir, base, ref string) (int, int, error) { return 0, 0, nil }
 
 var _ gitops.Ops = (*fakeGitOps)(nil)
 

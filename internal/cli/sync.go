@@ -64,14 +64,12 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 	if dirtyTracked {
 		return fmt.Errorf("tracked or staged changes detected — commit, stash, or push before sync")
 	}
-	if dirtyUntracked && !force {
-		return fmt.Errorf("untracked files in managed paths — use --force to remove them, or add/commit manually")
-	}
-	if dirtyUntracked {
+	if dirtyUntracked && force {
 		cmd := exec.Command("git", "-C", workDir, "clean", "-fd", "--", "skills/", "mcp/")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git clean failed: %w\n%s", err, out)
 		}
+		dirtyUntracked = false
 	}
 
 	if err := git.Fetch(workDir); err != nil {
@@ -115,6 +113,19 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 		return fmt.Errorf("local commits are not published — run: aiman push, or reset manually")
 	default:
 		return fmt.Errorf("history diverged — resolve with git manually, then run: aiman sync")
+	}
+
+	// git reset --hard preserves untracked files unless they exist in the incoming ref.
+	// Only check for conflicts when a reset is actually needed.
+	if needsReset && dirtyUntracked {
+		conflicts, conflictErr := git.UntrackedConflictsWithRef(workDir, "origin/main", gitops.ManagedPaths)
+		if conflictErr != nil {
+			return fmt.Errorf("cannot check untracked conflicts: %w", conflictErr)
+		}
+		if len(conflicts) > 0 {
+			return fmt.Errorf("untracked files would be overwritten by remote: %s\n"+
+				"rename them or use --force to discard local copies", strings.Join(conflicts, ", "))
+		}
 	}
 
 	skillsDir := filepath.Join(workDir, "skills")

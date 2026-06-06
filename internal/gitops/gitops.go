@@ -29,6 +29,9 @@ type Ops interface {
 	IsAncestor(dir, ancestor, descendant string) (bool, error)
 	HasDirtyWorktree(dir string) (bool, error)
 	HasUntrackedInPaths(dir string, paths []string) (bool, error)
+	// UntrackedConflictsWithRef returns untracked files in paths that also exist in ref.
+	// These files would be silently overwritten by git reset --hard.
+	UntrackedConflictsWithRef(dir, ref string, paths []string) ([]string, error)
 	CountAheadBehind(dir, base, ref string) (ahead, behind int, err error)
 }
 
@@ -210,6 +213,34 @@ func (e *ExecOps) HasUntrackedInPaths(dir string, paths []string) (bool, error) 
 		}
 	}
 	return false, nil
+}
+
+func (e *ExecOps) UntrackedConflictsWithRef(dir, ref string, paths []string) ([]string, error) {
+	// --untracked-files=all expands directory entries to individual files.
+	args := append([]string{"status", "--porcelain", "--untracked-files=all", "--"}, paths...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git status: %w\n%s", err, out)
+	}
+	var untracked []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "??") {
+			untracked = append(untracked, strings.TrimSpace(line[3:]))
+		}
+	}
+	if len(untracked) == 0 {
+		return nil, nil
+	}
+	var conflicts []string
+	for _, f := range untracked {
+		lsOut, lsErr := run(dir, "ls-tree", "--name-only", ref, "--", f)
+		if lsErr == nil && strings.TrimSpace(lsOut) != "" {
+			conflicts = append(conflicts, f)
+		}
+	}
+	return conflicts, nil
 }
 
 // ManagedStatus returns git status --porcelain lines for managed paths.

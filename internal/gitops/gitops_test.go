@@ -643,6 +643,91 @@ func TestHasUntrackedInPaths_untracked(t *testing.T) {
 	}
 }
 
+func TestUntrackedConflictsWithRef_noConflict(t *testing.T) {
+	bareDir, workDir := setupRepo(t)
+	initialCommit(t, workDir, bareDir)
+
+	// Commit a skill in remote
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "existing.md"), []byte("existing"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workDir, "add", ".")
+	runGit(t, workDir, "commit", "-m", "add skill")
+	runGit(t, workDir, "push", "origin", "main")
+	runGit(t, workDir, "fetch", "origin")
+
+	// Local untracked file with a DIFFERENT name — no conflict
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "new-local.md"), []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ops := gitops.New()
+	conflicts, err := ops.UntrackedConflictsWithRef(workDir, "origin/main", []string{"skills/"})
+	if err != nil {
+		t.Fatalf("UntrackedConflictsWithRef: %v", err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("expected no conflicts, got: %v", conflicts)
+	}
+}
+
+func TestUntrackedConflictsWithRef_conflict(t *testing.T) {
+	bareDir, workDir := setupRepo(t)
+	initialCommit(t, workDir, bareDir)
+
+	// Push a skill to remote
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "conflict.md"), []byte("remote version"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workDir, "add", ".")
+	runGit(t, workDir, "commit", "-m", "add conflict skill")
+	runGit(t, workDir, "push", "origin", "main")
+
+	// Clone fresh — local HEAD has the file tracked
+	work2 := t.TempDir()
+	runGit(t, "", "clone", bareDir, work2)
+	runGit(t, work2, "config", "user.email", "test@test.com")
+	runGit(t, work2, "config", "user.name", "Test")
+
+	// Revert local HEAD to before the file was added so conflict.md is untracked
+	runGit(t, work2, "reset", "--hard", "HEAD~1")
+
+	// skills/ may have been removed by the reset; recreate it
+	if err := os.MkdirAll(filepath.Join(work2, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-create the file as untracked with same name as in origin/main
+	if err := os.WriteFile(filepath.Join(work2, "skills", "conflict.md"), []byte("local version"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work2, "fetch", "origin")
+
+	ops := gitops.New()
+	conflicts, err := ops.UntrackedConflictsWithRef(work2, "origin/main", []string{"skills/"})
+	if err != nil {
+		t.Fatalf("UntrackedConflictsWithRef: %v", err)
+	}
+	if len(conflicts) == 0 {
+		t.Fatal("expected conflict for skills/conflict.md, got none")
+	}
+	found := false
+	for _, c := range conflicts {
+		if strings.Contains(c, "conflict.md") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected skills/conflict.md in conflicts, got: %v", conflicts)
+	}
+}
+
 func TestManagedStatus_clean(t *testing.T) {
 	dir := setupLocalRepo(t)
 	if err := os.MkdirAll(filepath.Join(dir, "skills"), 0755); err != nil {
