@@ -46,7 +46,7 @@ env:
 
 func TestAddMCP_NoEnvValues_WritesCleanYAML(t *testing.T) {
 	dir := t.TempDir()
-	err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir})
+	_, err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestAddMCP_NoEnvValues_WritesCleanYAML(t *testing.T) {
 
 func TestAddMCP_WithEnvValues_StripFromYAML(t *testing.T) {
 	dir := t.TempDir()
-	err := addMCP([]byte(validMCPWithEnvValues), AddOptions{WorkDir: dir})
+	_, err := addMCP([]byte(validMCPWithEnvValues), AddOptions{WorkDir: dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestAddMCP_WithEnvValues_StripFromYAML(t *testing.T) {
 
 func TestAddMCP_WithEnvValues_StoredInLocalConfig(t *testing.T) {
 	dir := t.TempDir()
-	err := addMCP([]byte(validMCPWithEnvValues), AddOptions{WorkDir: dir})
+	_, err := addMCP([]byte(validMCPWithEnvValues), AddOptions{WorkDir: dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestAddMCP_WithEnvValues_StoredInLocalConfig(t *testing.T) {
 
 func TestAddMCP_DescriptorFieldsPreserved(t *testing.T) {
 	dir := t.TempDir()
-	err := addMCP([]byte(validMCPWithEnvValues), AddOptions{WorkDir: dir})
+	_, err := addMCP([]byte(validMCPWithEnvValues), AddOptions{WorkDir: dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestAddMCP_DescriptorFieldsPreserved(t *testing.T) {
 }
 
 func TestAddMCP_InvalidYAML_Error(t *testing.T) {
-	err := addMCP([]byte("!!invalid: {"), AddOptions{WorkDir: t.TempDir()})
+	_, err := addMCP([]byte("!!invalid: {"), AddOptions{WorkDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -150,7 +150,7 @@ func TestAddMCP_ConflictNoOverwrite_ConflictError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir})
+	_, err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir})
 	if err == nil {
 		t.Fatal("expected ConflictError, got nil")
 	}
@@ -170,7 +170,7 @@ func TestAddMCP_ConflictWithOverwrite_Succeeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir, Overwrite: true})
+	_, err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir, Overwrite: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,11 +178,54 @@ func TestAddMCP_ConflictWithOverwrite_Succeeds(t *testing.T) {
 
 func TestAddMCP_NameOverride(t *testing.T) {
 	dir := t.TempDir()
-	err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir, Name: "custom-name"})
+	_, err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir, Name: "custom-name"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "mcp", "custom-name.yaml")); err != nil {
 		t.Fatalf("mcp/custom-name.yaml not written: %v", err)
+	}
+}
+
+func TestAddMCP_HasSecrets_ResultFlag(t *testing.T) {
+	dir := t.TempDir()
+	result, err := addMCP([]byte(validMCPWithEnvValues), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.HasSecrets {
+		t.Fatal("expected HasSecrets=true when env values are present")
+	}
+}
+
+func TestAddMCP_NoSecrets_ResultFlag(t *testing.T) {
+	dir := t.TempDir()
+	result, err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.HasSecrets {
+		t.Fatal("expected HasSecrets=false when no env values")
+	}
+}
+
+func TestAddMCP_Identical_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	// First write.
+	result1, err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("first add error: %v", err)
+	}
+	if result1.Identical {
+		t.Fatal("first add must not be identical")
+	}
+
+	// Second write with same content.
+	result2, err := addMCP([]byte(validMCPNoEnvValues), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("second add error: %v", err)
+	}
+	if !result2.Identical {
+		t.Fatal("second add with identical content must set Identical=true")
 	}
 }

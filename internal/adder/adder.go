@@ -11,10 +11,17 @@ type AddOptions struct {
 	Overwrite bool
 }
 
-func Add(itemType string, r io.Reader, opts AddOptions) error {
+// AddResult carries the outcome of a successful Add call.
+type AddResult struct {
+	Name       string
+	Identical  bool // true when the file already existed with identical content (no-op)
+	HasSecrets bool // true when MCP env values were written to aim.local.yaml
+}
+
+func Add(itemType string, r io.Reader, opts AddOptions) (AddResult, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return err
+		return AddResult{}, err
 	}
 	switch itemType {
 	case "skill":
@@ -22,6 +29,6 @@ func Add(itemType string, r io.Reader, opts AddOptions) error {
 	case "mcp":
 		return addMCP(raw, opts)
 	default:
-		return fmt.Errorf("unknown item type: %s", itemType)
+		return AddResult{}, fmt.Errorf("unknown item type: %s", itemType)
 	}
 }
