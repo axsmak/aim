@@ -17,19 +17,24 @@ var noReader = strings.NewReader("")
 
 // fakeGitOps is a configurable gitops.Ops for testing CLI commands without real git.
 type fakeGitOps struct {
-	cloneErr             error
-	cloned               bool
-	lsRemoteResult       string
-	lsRemoteErr          error
-	commitErr            error
-	commitCalled         bool
-	pushErr              error
-	pushCalled           bool
-	resetSoftCalled      bool
-	headHashResult       string
-	isFileStagedResult   map[string]bool
-	isAncestorResult     bool
-	isAncestorErr        error
+	cloneErr              error
+	cloned                bool
+	lsRemoteResult        string
+	lsRemoteErr           error
+	commitErr             error
+	commitCalled          bool
+	pushErr               error
+	pushCalled            bool
+	resetSoftCalled       bool
+	headHashResult        string
+	isFileStagedResult    map[string]bool
+	isAncestorResult      bool
+	isAncestorErr         error
+	diffNameStatusResult  []string
+	diffNameStatusErr     error
+	listUntrackedResult   []string
+	listUntrackedErr      error
+	countAheadBehindFn    func(dir, base, ref string) (int, int, error)
 }
 
 func (f *fakeGitOps) Clone(url, dir string) error                         { f.cloned = true; return f.cloneErr }
@@ -60,7 +65,18 @@ func (f *fakeGitOps) HasUntrackedInPaths(dir string, paths []string) (bool, erro
 func (f *fakeGitOps) UntrackedConflictsWithRef(dir, ref string, paths []string) ([]string, error) {
 	return nil, nil
 }
-func (f *fakeGitOps) CountAheadBehind(dir, base, ref string) (int, int, error) { return 0, 0, nil }
+func (f *fakeGitOps) CountAheadBehind(dir, base, ref string) (int, int, error) {
+	if f.countAheadBehindFn != nil {
+		return f.countAheadBehindFn(dir, base, ref)
+	}
+	return 0, 0, nil
+}
+func (f *fakeGitOps) DiffNameStatus(dir, ref string, paths []string) ([]string, error) {
+	return f.diffNameStatusResult, f.diffNameStatusErr
+}
+func (f *fakeGitOps) ListUntrackedInPaths(dir string, paths []string) ([]string, error) {
+	return f.listUntrackedResult, f.listUntrackedErr
+}
 
 var _ gitops.Ops = (*fakeGitOps)(nil)
 

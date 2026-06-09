@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/spf13/cobra"
 )
+
+var statusManagedPaths = []string{"skills/", "mcp/"}
 
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
@@ -20,113 +23,98 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				errs.Fatalf("cannot determine home directory: %v", err)
 			}
-			return runStatus(resolveWorkDir(homeDir))
+			return runStatus(resolveWorkDir(homeDir), gitops.New(), cmd.OutOrStdout())
 		},
 	}
 }
 
-func runStatus(workDir string) error {
+func runStatus(workDir string, git gitops.Ops, out io.Writer) error {
 	cfg, err := localconfig.Load(workDir)
 	if err != nil {
 		errs.Fatal(err.Error())
 	}
 
 	if cfg.Repo == "" {
-		fmt.Println("Repository not initialized. Run: aiman init <url>")
+		fmt.Fprintln(out, "Repository not initialized. Run: aiman init <url>")
 		return nil
 	}
 
-	ops := gitops.New()
+	headHash, _ := git.HeadHash(workDir)
 
-	// --- Repository axis ---
+	fmt.Fprintf(out, "Repository:   %s\n", cfg.Repo)
+	fmt.Fprintf(out, "Position:     %s\n", statusPosition(workDir, git))
+	fmt.Fprintf(out, "Environments: %s\n", statusEnvStatus(workDir, git, cfg, headHash))
 
-	headHash, err := ops.HeadHash(workDir)
+	delta := statusDelta(workDir, git)
+
+	fmt.Fprintln(out)
+	if len(delta) == 0 {
+		fmt.Fprintln(out, "Working tree matches origin/main · nothing to publish")
+		return nil
+	}
+
+	fmt.Fprintln(out, "Changes not yet published (origin/main → working tree):")
+	for _, d := range delta {
+		fmt.Fprintln(out, d)
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  run aiman push to publish")
+	return nil
+}
+
+func statusPosition(workDir string, git gitops.Ops) string {
+	ahead, behind, err := git.CountAheadBehind(workDir, "origin/main", "HEAD")
 	if err != nil {
-		errs.Fatal("cannot read HEAD: " + err.Error())
+		return "unreachable"
 	}
-
-	dirty, err := ops.HasDirtyWorktree(workDir)
-	if err != nil {
-		errs.Fatal("cannot check worktree state: " + err.Error())
-	}
-	untracked, err := ops.HasUntrackedInPaths(workDir, gitops.ManagedPaths)
-	if err != nil {
-		errs.Fatal("cannot check untracked files: " + err.Error())
-	}
-
-	repoStatus := "clean"
-	if dirty || untracked {
-		repoStatus = "dirty"
-	}
-
-	ahead, behind, err := ops.CountAheadBehind(workDir, "origin/main", "HEAD")
-	if err != nil {
-		errs.Fatal("cannot compute ahead/behind: " + err.Error())
-	}
-
-	var position string
 	switch {
 	case ahead > 0 && behind == 0:
-		position = fmt.Sprintf("ahead %d commit(s)", ahead)
+		return fmt.Sprintf("ahead %d commit(s)", ahead)
 	case behind > 0 && ahead == 0:
-		position = fmt.Sprintf("behind %d commit(s)", behind)
+		return fmt.Sprintf("behind %d commit(s)", behind)
 	case ahead > 0 && behind > 0:
-		position = "diverged"
+		return "diverged"
 	default:
-		position = "up-to-date"
+		return "up-to-date with origin/main"
 	}
+}
 
-	remoteHash, err := ops.RemoteHash(workDir, "origin/main")
+func statusEnvStatus(workDir string, git gitops.Ops, cfg localconfig.Config, headHash string) string {
+	if cfg.SyncedHash == "" {
+		return "unknown"
+	}
+	if cfg.SyncedHash == headHash {
+		return fmt.Sprintf("applied (synced %s)", shortHash(cfg.SyncedHash))
+	}
+	aheadFromSynced, _, err := git.CountAheadBehind(workDir, cfg.SyncedHash, headHash)
 	if err != nil {
-		errs.Fatal("cannot read remote state: " + err.Error())
+		return "needs sync"
 	}
+	return fmt.Sprintf("needs sync (%d commit(s) not applied)", aheadFromSynced)
+}
 
-	fmt.Println("Repository:")
-	fmt.Printf("  repo:     %s\n", cfg.Repo)
-	fmt.Printf("  status:   %s\n", repoStatus)
-	fmt.Printf("  position: %s\n", position)
-	fmt.Printf("  HEAD:     %s\n", shortHash(headHash))
-	fmt.Printf("  origin:   %s\n", shortHash(remoteHash))
-	if repoStatus == "dirty" || strings.HasPrefix(position, "ahead") {
-		fmt.Printf("  action:   run aiman push\n")
+func statusDelta(workDir string, git gitops.Ops) []string {
+	diffLines, err := git.DiffNameStatus(workDir, "origin/main", statusManagedPaths)
+	if err != nil {
+		return nil
 	}
+	untracked, _ := git.ListUntrackedInPaths(workDir, statusManagedPaths)
 
-	// --- Environment axis ---
-
-	publishedDisplay := "not set"
-	if cfg.PublishedHash != "" {
-		publishedDisplay = shortHash(cfg.PublishedHash)
-	}
-
-	appliedDisplay := "not set"
-	envStatus := "unknown"
-	action := ""
-
-	if cfg.SyncedHash != "" {
-		appliedDisplay = shortHash(cfg.SyncedHash)
-		if cfg.SyncedHash == headHash {
-			envStatus = "applied"
-		} else {
-			aheadFromSynced, _, countErr := ops.CountAheadBehind(workDir, cfg.SyncedHash, headHash)
-			if countErr != nil {
-				envStatus = "needs sync (cannot compute delta)"
-			} else {
-				envStatus = fmt.Sprintf("needs sync (%d commit(s) not applied)", aheadFromSynced)
-			}
-			action = "run aiman sync"
+	var delta []string
+	for _, line := range diffLines {
+		if line == "" {
+			continue
 		}
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 || len(parts[0]) == 0 {
+			continue
+		}
+		delta = append(delta, fmt.Sprintf("  %c %s", parts[0][0], parts[1]))
 	}
-
-	fmt.Println()
-	fmt.Println("Environment:")
-	fmt.Printf("  published: %s\n", publishedDisplay)
-	fmt.Printf("  applied:   %s\n", appliedDisplay)
-	fmt.Printf("  status:    %s\n", envStatus)
-	if action != "" {
-		fmt.Printf("  action:    %s\n", action)
+	for _, f := range untracked {
+		delta = append(delta, fmt.Sprintf("  A %s", f))
 	}
-
-	return nil
+	return delta
 }
 
 func shortHash(h string) string {
