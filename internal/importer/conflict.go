@@ -10,6 +10,7 @@ type ConflictError struct {
 	Path string
 }
 
+// If this message changes, update the import-specific hint in internal/cli/import.go (errors.As wrap).
 func (e ConflictError) Error() string {
 	return fmt.Sprintf("%s already exists with different content; use --overwrite to replace or --name to save as a new item", e.Path)
 }

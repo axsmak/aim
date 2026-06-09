@@ -180,7 +180,7 @@ func runInit(url, destDir, homeDir string, git gitops.Ops, in io.Reader, out io.
 		if r.found {
 			fmt.Fprintf(out, "  ✓ %s: %s\n", r.name, r.dir)
 		} else {
-			fmt.Fprintf(out, "  - %s: not found\n", r.name)
+			fmt.Fprintf(out, "  ✗ %s: not found\n", r.name)
 		}
 	}
 	return nil

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -73,7 +74,8 @@ func newImportSkillCmd() *cobra.Command {
 				for i, m := range matches {
 					sources[i] = m.Source
 				}
-				return importer.AmbiguousError{Name: name, Sources: sources}
+				ae := importer.AmbiguousError{Name: name, Sources: sources}
+				return fmt.Errorf("%s: found in multiple sources %v; rename or remove duplicates, or import the file directly with aiman add skill <file>", ae.Name, ae.Sources)
 			}
 
 			found := matches[0]
@@ -89,7 +91,12 @@ func newImportSkillCmd() *cobra.Command {
 
 			destPath := filepath.Join(workDir, "skills", found.Name+".md")
 
+			// If ConflictError message in conflict.go changes, update this import-specific hint too.
 			if err := importer.CheckConflict(destPath, found.Raw, overwrite); err != nil {
+				var ce importer.ConflictError
+				if errors.As(err, &ce) {
+					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
+				}
 				return err
 			}
 
@@ -186,7 +193,12 @@ func newImportMCPCmd() *cobra.Command {
 
 			destPath := filepath.Join(workDir, "mcp", name+".yaml")
 
+			// If ConflictError message in conflict.go changes, update this import-specific hint too.
 			if err := importer.CheckConflict(destPath, yamlBytes, overwrite); err != nil {
+				var ce importer.ConflictError
+				if errors.As(err, &ce) {
+					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
+				}
 				return err
 			}
 
