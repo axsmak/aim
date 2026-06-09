@@ -26,7 +26,7 @@ func newImportCmd() *cobra.Command {
 
 func newImportSkillCmd() *cobra.Command {
 	var from string
-	var dryRun bool
+	var printOnly bool
 	var overwrite bool
 	var targets string
 
@@ -84,7 +84,7 @@ func newImportSkillCmd() *cobra.Command {
 				return err
 			}
 
-			if dryRun {
+			if printOnly {
 				_, err := cmd.OutOrStdout().Write(found.Raw)
 				return err
 			}
@@ -109,7 +109,7 @@ func newImportSkillCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&from, "from", "", "source AI environment (claude-code, cursor, codex)")
 	_ = cmd.MarkFlagRequired("from")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print skill content without writing to disk")
+	cmd.Flags().BoolVar(&printOnly, "print", false, "print skill content without writing to disk")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace existing skill if content differs")
 	cmd.Flags().StringVar(&targets, "targets", "", "target environments (ignored for skills)")
 
@@ -120,7 +120,7 @@ var allAdapterNames = []string{"claude-code", "cursor", "codex"}
 
 func newImportMCPCmd() *cobra.Command {
 	var from string
-	var dryRun bool
+	var printOnly bool
 	var overwrite bool
 	var targets string
 
@@ -202,7 +202,7 @@ func newImportMCPCmd() *cobra.Command {
 				return err
 			}
 
-			if dryRun {
+			if printOnly {
 				_, err := cmd.OutOrStdout().Write(yamlBytes)
 				return err
 			}
@@ -233,7 +233,7 @@ func newImportMCPCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&from, "from", "", "source AI environment (claude-code, cursor, codex)")
 	_ = cmd.MarkFlagRequired("from")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print MCP config without writing to disk")
+	cmd.Flags().BoolVar(&printOnly, "print", false, "print MCP config without writing to disk")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace existing MCP config if content differs")
 	cmd.Flags().StringVar(&targets, "targets", "", `target environments; use "all" for all adapters`)
 

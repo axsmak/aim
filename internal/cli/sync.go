@@ -141,20 +141,19 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 			shortHash = shortHash[:7]
 		}
 		fmt.Fprintf(out, "[dry-run] would apply: %s\n", shortHash)
-		fmt.Fprintln(out, "Current local inventory (before reset):")
 		skills, _, err := skill.ReadAll(skillsDir)
 		if err == nil && len(skills) > 0 {
-			fmt.Fprintf(out, "Skills (%d):\n", len(skills))
+			fmt.Fprintf(out, "  Skills (%d):\n", len(skills))
 			for _, s := range skills {
-				fmt.Fprintf(out, "  - %s\n", s.Name)
+				fmt.Fprintf(out, "    - %s\n", s.Name)
 			}
 		}
 		mcpItems, _ := mcp.ParseDir(mcpDirFull)
 		if len(mcpItems) > 0 {
-			fmt.Fprintf(out, "MCP servers (%d):\n", len(mcpItems))
+			fmt.Fprintf(out, "  MCP servers (%d):\n", len(mcpItems))
 			for _, m := range mcpItems {
 				envStatus := mcpEnvStatus(m, cfg)
-				fmt.Fprintf(out, "  - %s → %s  %s\n", m.Name, strings.Join(m.Targets, ", "), envStatus)
+				fmt.Fprintf(out, "    - %s → %s  %s\n", m.Name, strings.Join(m.Targets, ", "), envStatus)
 			}
 		}
 		return nil

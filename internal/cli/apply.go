@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/axsmak/aim/internal/adapter"
 	"github.com/axsmak/aim/internal/errs"
@@ -64,6 +67,12 @@ func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io
 	return nil
 }
 
+// skillDelta holds the change category and list of envs where the skill differs.
+type skillDelta struct {
+	category string // "A" = new, "M" = modified
+	envNames []string
+}
+
 func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDir string, out, errOut io.Writer) error {
 	valid, invalid, err := skill.ReadAll(skillsDir)
 	if err != nil {
@@ -78,24 +87,132 @@ func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDi
 		fmt.Fprintf(errOut, "warning: %v\n", e)
 	}
 
+	// Collect detected adapters only.
+	var detectedAdapters []adapter.Adapter
+	var detectedBaseDirs []string
+	var detectedNames []string
 	for _, a := range adapter.DefaultAdapters(cfg) {
-		_, found := a.Detect(homeDir)
+		baseDir, found := a.Detect(homeDir)
 		if !found {
 			continue
 		}
-		if len(valid) > 0 {
-			fmt.Fprintf(out, "[dry-run] would install in %s (%d skills):\n", a.Name(), len(valid))
-			for _, s := range valid {
-				fmt.Fprintf(out, "  - %s\n", s.Name)
-			}
-		}
-		for _, m := range mcpItems {
-			if !containsTarget(m.Targets, a.Name()) {
+		detectedAdapters = append(detectedAdapters, a)
+		detectedBaseDirs = append(detectedBaseDirs, baseDir)
+		detectedNames = append(detectedNames, a.Name())
+	}
+
+	// No environments detected — output nothing.
+	if len(detectedAdapters) == 0 {
+		return nil
+	}
+
+	// Build skill delta: map skillName → {category, []envNames}.
+	// category A = file missing in env; category M = content differs.
+	deltaMap := make(map[string]*skillDelta)
+	for _, s := range valid {
+		inventoryHash := sha256.Sum256(s.Raw)
+		for i, a := range detectedAdapters {
+			installedPath := filepath.Join(detectedBaseDirs[i], "skills", s.Name, "SKILL.md")
+			raw, readErr := os.ReadFile(installedPath)
+			if readErr != nil {
+				// File not present in this env.
+				d := deltaMap[s.Name]
+				if d == nil {
+					d = &skillDelta{category: "A"}
+					deltaMap[s.Name] = d
+				}
+				d.envNames = append(d.envNames, a.Name())
 				continue
 			}
-			envStatus := mcpEnvStatus(m, cfg)
-			fmt.Fprintf(out, "[dry-run] MCP %s → %s  %s\n", m.Name, a.Name(), envStatus)
+			installedHash := sha256.Sum256(raw)
+			if installedHash != inventoryHash {
+				d := deltaMap[s.Name]
+				if d == nil {
+					d = &skillDelta{category: "M"}
+					deltaMap[s.Name] = d
+				} else if d.category == "A" {
+					// If already categorized as A (missing in other envs), keep A.
+				} else {
+					d.category = "M"
+				}
+				d.envNames = append(d.envNames, a.Name())
+			}
 		}
 	}
+
+	// Build MCP lines.
+	type mcpLine struct {
+		name   string
+		status string // "up to date in all environments" or specific env status
+		envTag string // optional [missing env: ...] suffix
+	}
+	var mcpLines []mcpLine
+	for _, m := range mcpItems {
+		// Only include MCPs that target at least one detected adapter.
+		var targetedEnvs []string
+		for _, a := range detectedAdapters {
+			if containsTarget(m.Targets, a.Name()) {
+				targetedEnvs = append(targetedEnvs, a.Name())
+			}
+		}
+		if len(targetedEnvs) == 0 {
+			continue
+		}
+		envTag := mcpEnvStatus(m, cfg)
+		var status string
+		if len(targetedEnvs) == len(detectedAdapters) {
+			status = "up to date in all environments"
+		} else {
+			status = "up to date in " + strings.Join(targetedEnvs, ", ")
+		}
+		mcpLines = append(mcpLines, mcpLine{name: m.Name, status: status, envTag: envTag})
+	}
+
+	// If no changes and no MCPs to report, output "nothing to apply".
+	if len(deltaMap) == 0 && len(mcpLines) == 0 {
+		fmt.Fprintln(out, "[dry-run] nothing to apply — environments match local inventory")
+		return nil
+	}
+
+	// Build summary.
+	totalEnvCount := len(detectedNames)
+	envList := strings.Join(detectedNames, ", ")
+
+	if len(deltaMap) > 0 {
+		// Count total unique change entries.
+		changeCount := len(deltaMap)
+		fmt.Fprintf(out, "[dry-run] would apply %d change(s) to %d environment(s) (%s):\n", changeCount, totalEnvCount, envList)
+
+		// Sort for deterministic output.
+		var skillNames []string
+		for name := range deltaMap {
+			skillNames = append(skillNames, name)
+		}
+		sort.Strings(skillNames)
+
+		for _, name := range skillNames {
+			d := deltaMap[name]
+			var envDesc string
+			if len(d.envNames) == totalEnvCount {
+				envDesc = "all environments"
+			} else {
+				envDesc = strings.Join(d.envNames, ", ")
+			}
+			if d.category == "A" {
+				fmt.Fprintf(out, "  A skills/%s.md   (new in %s)\n", name, envDesc)
+			} else {
+				fmt.Fprintf(out, "  M skills/%s.md   (differs in %s)\n", name, envDesc)
+			}
+		}
+	}
+
+	for _, ml := range mcpLines {
+		if ml.envTag != "" {
+			fmt.Fprintf(out, "[dry-run] MCP %s → %s  %s\n", ml.name, ml.status, ml.envTag)
+		} else {
+			fmt.Fprintf(out, "[dry-run] MCP %s → %s\n", ml.name, ml.status)
+		}
+	}
+
 	return nil
 }

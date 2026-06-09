@@ -106,7 +106,7 @@ func TestImportSkill_DryRun(t *testing.T) {
 
 	setupClaudeSkill(t, fakeHome, "test-skill", testSkillContent)
 
-	stdout, _, err := runImportCmd(t, fakeHome, workDir, "skill", "test-skill", "--from", "claude-code", "--dry-run")
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "skill", "test-skill", "--from", "claude-code", "--print")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
