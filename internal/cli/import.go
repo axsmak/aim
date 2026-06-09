@@ -93,6 +93,10 @@ func newImportSkillCmd() *cobra.Command {
 
 			// If ConflictError message in conflict.go changes, update this import-specific hint too.
 			if err := importer.CheckConflict(destPath, found.Raw, overwrite); err != nil {
+				if errors.Is(err, importer.ErrIdentical) {
+					fmt.Fprintf(cmd.OutOrStdout(), "up to date: skill %s · already identical\n", found.Name)
+					return nil
+				}
 				var ce importer.ConflictError
 				if errors.As(err, &ce) {
 					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
@@ -103,7 +107,11 @@ func newImportSkillCmd() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 				return err
 			}
-			return os.WriteFile(destPath, found.Raw, 0644)
+			if err := os.WriteFile(destPath, found.Raw, 0644); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "imported: skill %s · from %s\n", found.Name, from)
+			return nil
 		},
 	}
 
@@ -195,6 +203,10 @@ func newImportMCPCmd() *cobra.Command {
 
 			// If ConflictError message in conflict.go changes, update this import-specific hint too.
 			if err := importer.CheckConflict(destPath, yamlBytes, overwrite); err != nil {
+				if errors.Is(err, importer.ErrIdentical) {
+					fmt.Fprintf(cmd.OutOrStdout(), "up to date: mcp %s · already identical\n", name)
+					return nil
+				}
 				var ce importer.ConflictError
 				if errors.As(err, &ce) {
 					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
@@ -227,6 +239,11 @@ func newImportMCPCmd() *cobra.Command {
 				}
 			}
 
+			if len(secrets) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "imported: mcp %s · from %s · secrets stored in aim.local.yaml\n", name, from)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "imported: mcp %s · from %s\n", name, from)
+			}
 			return nil
 		},
 	}

@@ -130,3 +130,112 @@ func TestImportMCP_RequiresFromFlag(t *testing.T) {
 		t.Fatal("expected error when --from is missing, got nil")
 	}
 }
+
+func TestImportSkill_SuccessOutput(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	setupClaudeSkill(t, fakeHome, "test-skill", testSkillContent)
+
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "skill", "test-skill", "--from", "claude-code")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "imported: skill test-skill \xc2\xb7 from claude-code\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestImportSkill_IdenticalNoOp_Output(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	setupClaudeSkill(t, fakeHome, "test-skill", testSkillContent)
+
+	// First import — new write.
+	if _, _, err := runImportCmd(t, fakeHome, workDir, "skill", "test-skill", "--from", "claude-code"); err != nil {
+		t.Fatalf("first import unexpected error: %v", err)
+	}
+
+	// Second import — identical no-op.
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "skill", "test-skill", "--from", "claude-code")
+	if err != nil {
+		t.Fatalf("second import unexpected error: %v", err)
+	}
+
+	want := "up to date: skill test-skill \xc2\xb7 already identical\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestImportMCP_SuccessOutput_WithSecrets(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"jira": jiraServerEntry(),
+	})
+
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "jira", "--from", "cursor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "imported: mcp jira \xc2\xb7 from cursor \xc2\xb7 secrets stored in aim.local.yaml\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestImportMCP_SuccessOutput_NoSecrets(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"simple-tool": map[string]interface{}{
+			"command": "node",
+			"args":    []interface{}{"./server.js"},
+		},
+	})
+
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "simple-tool", "--from", "cursor")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "imported: mcp simple-tool \xc2\xb7 from cursor\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestImportMCP_IdenticalNoOp_Output(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"simple-tool": map[string]interface{}{
+			"command": "node",
+			"args":    []interface{}{"./server.js"},
+		},
+	})
+
+	// First import — new write.
+	if _, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "simple-tool", "--from", "cursor"); err != nil {
+		t.Fatalf("first import unexpected error: %v", err)
+	}
+
+	// Second import — identical no-op.
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "simple-tool", "--from", "cursor")
+	if err != nil {
+		t.Fatalf("second import unexpected error: %v", err)
+	}
+
+	want := "up to date: mcp simple-tool \xc2\xb7 already identical\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
