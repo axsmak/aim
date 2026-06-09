@@ -1,6 +1,10 @@
 package cli
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestFormatSuccess(t *testing.T) {
 	tests := []struct {
@@ -95,6 +99,60 @@ func TestFormatSuccess(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTruncateDelta(t *testing.T) {
+	makeLines := func(n int) []string {
+		lines := make([]string, n)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("  A skills/skill-%02d.md", i+1)
+		}
+		return lines
+	}
+
+	t.Run("fewer than threshold: no truncation", func(t *testing.T) {
+		in := makeLines(5)
+		got := TruncateDelta(in, 20)
+		if len(got) != 5 {
+			t.Errorf("want 5 lines, got %d", len(got))
+		}
+	})
+
+	t.Run("exactly threshold: no truncation", func(t *testing.T) {
+		in := makeLines(20)
+		got := TruncateDelta(in, 20)
+		if len(got) != 20 {
+			t.Errorf("want 20 lines, got %d", len(got))
+		}
+		if strings.Contains(strings.Join(got, "\n"), "more") {
+			t.Errorf("unexpected truncation line at exactly threshold")
+		}
+	})
+
+	t.Run("exceeds threshold: first 20 + counter", func(t *testing.T) {
+		in := makeLines(57)
+		got := TruncateDelta(in, 20)
+		if len(got) != 21 {
+			t.Errorf("want 21 lines (20 + counter), got %d", len(got))
+		}
+		last := got[20]
+		want := "  … and 37 more"
+		if last != want {
+			t.Errorf("counter line: got %q, want %q", last, want)
+		}
+	})
+
+	t.Run("exactly one over threshold: counter shows 1", func(t *testing.T) {
+		in := makeLines(21)
+		got := TruncateDelta(in, 20)
+		if len(got) != 21 {
+			t.Errorf("want 21 lines, got %d", len(got))
+		}
+		want := "  … and 1 more"
+		if got[20] != want {
+			t.Errorf("counter line: got %q, want %q", got[20], want)
+		}
+	})
 }
 
 func TestPlural(t *testing.T) {

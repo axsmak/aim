@@ -190,6 +190,7 @@ func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDi
 		}
 		sort.Strings(skillNames)
 
+		var skillLines []string
 		for _, name := range skillNames {
 			d := deltaMap[name]
 			var envDesc string
@@ -199,10 +200,13 @@ func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDi
 				envDesc = strings.Join(d.envNames, ", ")
 			}
 			if d.category == "A" {
-				fmt.Fprintf(out, "  A skills/%s.md   (new in %s)\n", name, envDesc)
+				skillLines = append(skillLines, fmt.Sprintf("  A skills/%s.md   (new in %s)", name, envDesc))
 			} else {
-				fmt.Fprintf(out, "  M skills/%s.md   (differs in %s)\n", name, envDesc)
+				skillLines = append(skillLines, fmt.Sprintf("  M skills/%s.md   (differs in %s)", name, envDesc))
 			}
+		}
+		for _, line := range TruncateDelta(skillLines, deltaTruncateThreshold) {
+			fmt.Fprintln(out, line)
 		}
 	}
 

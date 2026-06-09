@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,6 +79,32 @@ func TestRunStatus_WithUntracked(t *testing.T) {
 	assertContains(t, got, "Changes not yet published (origin/main → working tree):")
 	assertContains(t, got, "  A skills/new-skill.md")
 	assertContains(t, got, "  run aiman push to publish")
+}
+
+func TestRunStatus_DeltaTruncated(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
+
+	// Build 57 diff lines to exceed the 20-line threshold.
+	diffLines := make([]string, 57)
+	for i := range diffLines {
+		diffLines[i] = fmt.Sprintf("A\tskills/skill-%02d.md", i+1)
+	}
+	git := &fakeGitOps{
+		headHashResult:       "abc1234567890",
+		diffNameStatusResult: diffLines,
+		listUntrackedResult:  nil,
+	}
+	var out bytes.Buffer
+	if err := runStatus(dir, git, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := out.String()
+	assertContains(t, got, "  A skills/skill-01.md")
+	assertContains(t, got, "  A skills/skill-20.md")
+	if strings.Contains(got, "  A skills/skill-21.md") {
+		t.Errorf("line 21 must be truncated, got: %q", got)
+	}
+	assertContains(t, got, "  … and 37 more")
 }
 
 func TestRunStatus_Position_Ahead(t *testing.T) {

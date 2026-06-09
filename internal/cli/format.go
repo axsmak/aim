@@ -5,6 +5,19 @@ import (
 	"strings"
 )
 
+const deltaTruncateThreshold = 20
+
+// TruncateDelta caps artifact lines at maxLines, appending "  … and N more" when exceeded.
+func TruncateDelta(lines []string, maxLines int) []string {
+	if len(lines) <= maxLines {
+		return lines
+	}
+	out := make([]string, maxLines+1)
+	copy(out, lines[:maxLines])
+	out[maxLines] = fmt.Sprintf("  … and %d more", len(lines)-maxLines)
+	return out
+}
+
 // FormatSuccess builds the canonical success line.
 //
 // Canonical template (ADR 4.1):

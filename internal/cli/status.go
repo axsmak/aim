@@ -54,7 +54,7 @@ func runStatus(workDir string, git gitops.Ops, out io.Writer) error {
 	}
 
 	fmt.Fprintln(out, "Changes not yet published (origin/main → working tree):")
-	for _, d := range delta {
+	for _, d := range TruncateDelta(delta, deltaTruncateThreshold) {
 		fmt.Fprintln(out, d)
 	}
 	fmt.Fprintln(out)
