@@ -74,8 +74,8 @@ func TestApply_InstallsSkill(t *testing.T) {
 	if _, statErr := os.Stat(installPath); statErr != nil {
 		t.Errorf("skill not installed at %s: %v", installPath, statErr)
 	}
-	if !strings.Contains(stdout, "Applied:") {
-		t.Errorf("expected 'Applied:' in output, got: %q", stdout)
+	if !strings.Contains(stdout, "applied:") {
+		t.Errorf("expected 'applied:' in output, got: %q", stdout)
 	}
 }
 

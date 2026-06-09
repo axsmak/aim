@@ -403,8 +403,8 @@ func TestRunInit_AdoptableRepo(t *testing.T) {
 	}
 
 	output := out.String()
-	if !strings.Contains(output, "(new library)") {
-		t.Errorf("expected '(new library)' in output, got: %q", output)
+	if !strings.Contains(output, "· new library") {
+		t.Errorf("expected '· new library' in output, got: %q", output)
 	}
 	if !strings.Contains(output, "Library scaffold created") {
 		t.Errorf("expected scaffold message in output, got: %q", output)
@@ -432,8 +432,8 @@ func TestRunInit_ExistingAIMRepo(t *testing.T) {
 	}
 
 	output := out.String()
-	if !strings.Contains(output, "(existing library)") {
-		t.Errorf("expected '(existing library)' in output, got: %q", output)
+	if !strings.Contains(output, "· existing library") {
+		t.Errorf("expected '· existing library' in output, got: %q", output)
 	}
 	if !strings.Contains(output, "Library found") {
 		t.Errorf("expected 'Library found' in output, got: %q", output)

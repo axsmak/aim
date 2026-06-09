@@ -151,10 +151,6 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 	if len(shortHash) > 7 {
 		shortHash = shortHash[:7]
 	}
-	if len(mcpItems) > 0 {
-		fmt.Fprintf(out, "published: %s — %d skills, %d MCP servers\n", shortHash, len(valid), len(mcpItems))
-	} else {
-		fmt.Fprintf(out, "published: %s — %d skills\n", shortHash, len(valid))
-	}
+	fmt.Fprintln(out, FormatSuccess("published", shortHash, len(valid), len(mcpItems), 0))
 	return nil
 }

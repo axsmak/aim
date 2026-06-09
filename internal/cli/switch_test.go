@@ -82,8 +82,8 @@ func TestSwitchValidRepoWithGitAndSkills(t *testing.T) {
 	}
 
 	absPath, _ := filepath.Abs(repoDir)
-	if !strings.Contains(out.String(), "switched to "+absPath) {
-		t.Errorf("expected output 'switched to %s', got: %s", absPath, out.String())
+	if !strings.Contains(out.String(), "switched: "+absPath) {
+		t.Errorf("expected output 'switched:%s', got: %s", absPath, out.String())
 	}
 
 	// Verify global config updated
@@ -112,8 +112,8 @@ func TestSwitchValidRepoWithAimLocalYaml(t *testing.T) {
 	}
 
 	absPath, _ := filepath.Abs(repoDir)
-	if !strings.Contains(out.String(), "switched to "+absPath) {
-		t.Errorf("expected output 'switched to %s', got: %s", absPath, out.String())
+	if !strings.Contains(out.String(), "switched: "+absPath) {
+		t.Errorf("expected output 'switched:%s', got: %s", absPath, out.String())
 	}
 
 	// Verify global config updated
@@ -147,8 +147,8 @@ func TestSwitchTildeExpansion(t *testing.T) {
 	}
 
 	expectedPath := subDir
-	if !strings.Contains(out.String(), "switched to "+expectedPath) {
-		t.Errorf("expected output 'switched to %s', got: %s", expectedPath, out.String())
+	if !strings.Contains(out.String(), "switched: "+expectedPath) {
+		t.Errorf("expected output 'switched:%s', got: %s", expectedPath, out.String())
 	}
 }
 

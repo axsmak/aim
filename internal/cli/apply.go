@@ -60,8 +60,7 @@ func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io
 	if mcpErr != nil {
 		return mcpErr
 	}
-	fmt.Fprintf(out, "Applied: %d skills, %d MCP servers in %d environments\n",
-		skillCount, mcpCount, max(envCount, mcpEnvCount))
+	fmt.Fprintln(out, FormatSuccess("applied", "", skillCount, mcpCount, max(envCount, mcpEnvCount)))
 	return nil
 }
 

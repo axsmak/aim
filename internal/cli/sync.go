@@ -197,7 +197,7 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 	if combinedErr != nil {
 		return combinedErr
 	}
-	fmt.Fprintf(out, "Synced: %s — %d skills, %d MCP servers in %d environments\n", shortHash, skillCount, mcpCount, max(envCount, mcpEnvCount))
+	fmt.Fprintln(out, FormatSuccess("synced", shortHash, skillCount, mcpCount, max(envCount, mcpEnvCount)))
 	return nil
 }
 
@@ -233,6 +233,7 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 	}
 
 	cfgChanged := false
+	installedEnvCount := 0
 
 	for _, a := range adapter.DefaultAdapters(cfg) {
 		baseDir, found := a.Detect(homeDir)
@@ -286,12 +287,11 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 				continue
 			}
 		}
-		if len(valid) > 0 {
-			fmt.Fprintf(out, "applied: %d skills in %s\n", len(valid), a.Name())
-		}
-		if len(mcpItems) > 0 {
-			fmt.Fprintf(out, "applied: %d MCP servers in %s\n", len(mcpItems), a.Name())
-		}
+		installedEnvCount++
+	}
+
+	if !dryRun && installedEnvCount > 0 {
+		fmt.Fprintln(out, FormatSuccess("applied", "", len(valid), len(mcpItems), installedEnvCount))
 	}
 
 	if cfgChanged {

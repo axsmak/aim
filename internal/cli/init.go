@@ -168,9 +168,9 @@ func runInit(url, destDir, homeDir string, git gitops.Ops, in io.Reader, out io.
 	// Print result
 	switch class {
 	case repoAdoptable:
-		fmt.Fprintf(out, "initialized: %s (new library)\n", url)
+		fmt.Fprintf(out, "initialized: %s · new library\n", url)
 	case repoExistingAIM:
-		fmt.Fprintf(out, "initialized: %s (existing library)\n", url)
+		fmt.Fprintf(out, "initialized: %s · existing library\n", url)
 	}
 	if nextStep != "" {
 		fmt.Fprintln(out, nextStep)
