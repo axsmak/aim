@@ -53,7 +53,16 @@ func newAddSkillCmd() *cobra.Command {
 				Overwrite: overwrite,
 			}
 
-			return adder.Add("skill", r, opts)
+			result, err := adder.Add("skill", r, opts)
+			if err != nil {
+				return err
+			}
+			if result.Identical {
+				fmt.Fprintf(cmd.OutOrStdout(), "up to date: skill %s · already identical\n", result.Name)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "added: skill %s\n", result.Name)
+			}
+			return nil
 		},
 	}
 
@@ -97,7 +106,16 @@ func newAddMCPCmd() *cobra.Command {
 				Overwrite: overwrite,
 			}
 
-			return adder.Add("mcp", r, opts)
+			result, err := adder.Add("mcp", r, opts)
+			if err != nil {
+				return err
+			}
+			if result.Identical {
+				fmt.Fprintf(cmd.OutOrStdout(), "up to date: mcp %s · already identical\n", result.Name)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "added: mcp %s\n", result.Name)
+			}
+			return nil
 		},
 	}
 

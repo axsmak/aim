@@ -273,10 +273,10 @@ func TestRunPush_success_withMCP(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	output := out.String()
-	if !strings.Contains(output, "MCP servers") {
+	if !strings.Contains(output, "MCP server") {
 		t.Errorf("expected MCP count in output, got: %q", output)
 	}
-	if !strings.Contains(output, "skills") {
+	if !strings.Contains(output, "skill") {
 		t.Errorf("expected skill count in output, got: %q", output)
 	}
 }

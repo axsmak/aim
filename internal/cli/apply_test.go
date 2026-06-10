@@ -74,8 +74,8 @@ func TestApply_InstallsSkill(t *testing.T) {
 	if _, statErr := os.Stat(installPath); statErr != nil {
 		t.Errorf("skill not installed at %s: %v", installPath, statErr)
 	}
-	if !strings.Contains(stdout, "Applied:") {
-		t.Errorf("expected 'Applied:' in output, got: %q", stdout)
+	if !strings.Contains(stdout, "applied:") {
+		t.Errorf("expected 'applied:' in output, got: %q", stdout)
 	}
 }
 
@@ -223,5 +223,211 @@ func TestApply_DryRun_DoesNotPersistEnv(t *testing.T) {
 	}
 	if cfgAfter.PublishedHash != cfgBefore.PublishedHash {
 		t.Errorf("published_hash changed during dry-run: before=%q after=%q", cfgBefore.PublishedHash, cfgAfter.PublishedHash)
+	}
+}
+
+// --- sha256 delta edge cases (ADR 4.4/A1) ---
+
+// TestApplyDryRun_SkillNotInAnyEnv: skill in inventory, not installed in any env → "A (new in all environments)".
+func TestApplyDryRun_SkillNotInAnyEnv(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "refactor-helper.md"),
+		[]byte("---\nname: refactor-helper\ndescription: Refactors code\n---\n\n# Role\nHelps refactor.\n"),
+		0644,
+	); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	// Claude env dir exists (.claude created by setupApplyWorkDir) but no skills installed.
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "[dry-run]") {
+		t.Errorf("expected [dry-run] prefix, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "refactor-helper") {
+		t.Errorf("expected skill name in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "new in all environments") {
+		t.Errorf("expected 'new in all environments', got: %q", stdout)
+	}
+	if strings.Contains(stdout, "nothing to apply") {
+		t.Errorf("must not say 'nothing to apply' when skill is new, got: %q", stdout)
+	}
+}
+
+// TestApplyDryRun_SkillMissingInSubsetOfEnvs: skill in inventory, missing in only one env (claude-code),
+// but present with matching content in another env — should show "A (new in claude-code)".
+// We fake two adapters by using localconfig.Adapters overrides (cursor points at a dir that has the skill).
+func TestApplyDryRun_SkillMissingInSubsetOfEnvs(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	// Set up fake claude-code env (exists, no skills installed).
+	claudeDir := filepath.Join(fakeHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("mkdir claude: %v", err)
+	}
+
+	// Set up fake cursor env with skill already installed (matching content).
+	cursorDir := filepath.Join(fakeHome, ".cursor")
+	skillContent := "---\nname: commit-message\ndescription: Writes commit messages\n---\n\n# Role\nWrites commits.\n"
+	installedPath := filepath.Join(cursorDir, "skills", "commit-message", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(installedPath), 0755); err != nil {
+		t.Fatalf("mkdir cursor skill: %v", err)
+	}
+	if err := os.WriteFile(installedPath, []byte(skillContent), 0644); err != nil {
+		t.Fatalf("write cursor skill: %v", err)
+	}
+
+	// Write skill to inventory.
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "commit-message.md"),
+		[]byte(skillContent),
+		0644,
+	); err != nil {
+		t.Fatalf("write inventory skill: %v", err)
+	}
+
+	// Configure adapters via localconfig overrides so cursor points at cursorDir.
+	cfg := localconfig.Config{}
+	cfg.Adapters.ClaudeCode.BaseDir = claudeDir
+	cfg.Adapters.Cursor.BaseDir = cursorDir
+	if err := localconfig.Save(workDir, cfg); err != nil {
+		t.Fatalf("save localconfig: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// commit-message is already up to date in cursor, but missing in claude-code.
+	if !strings.Contains(stdout, "commit-message") {
+		t.Errorf("expected skill name in output, got: %q", stdout)
+	}
+	// Should show A (new in claude-code), not "all environments".
+	if strings.Contains(stdout, "all environments") {
+		t.Errorf("must not say 'all environments' when only one env is missing, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "claude-code") {
+		t.Errorf("expected 'claude-code' env listed in output, got: %q", stdout)
+	}
+}
+
+// TestApplyDryRun_SkillContentDiffers: skill in inventory, installed in env with different content → "M (differs in ...)".
+func TestApplyDryRun_SkillContentDiffers(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	inventoryContent := "---\nname: commit-message\ndescription: Writes commit messages\n---\n\n# Role\nNew version.\n"
+	installedContent := "---\nname: commit-message\ndescription: Writes commit messages\n---\n\n# Role\nOld version.\n"
+
+	// Install old version in claude env.
+	installedPath := filepath.Join(fakeHome, ".claude", "skills", "commit-message", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(installedPath), 0755); err != nil {
+		t.Fatalf("mkdir installed skill: %v", err)
+	}
+	if err := os.WriteFile(installedPath, []byte(installedContent), 0644); err != nil {
+		t.Fatalf("write installed skill: %v", err)
+	}
+
+	// Write new version to inventory.
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "commit-message.md"),
+		[]byte(inventoryContent),
+		0644,
+	); err != nil {
+		t.Fatalf("write inventory skill: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "commit-message") {
+		t.Errorf("expected skill name in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "differs in") {
+		t.Errorf("expected 'differs in' for modified skill, got: %q", stdout)
+	}
+	// Must use M (modified) category.
+	if !strings.Contains(stdout, "  M ") {
+		t.Errorf("expected 'M' category for modified skill, got: %q", stdout)
+	}
+}
+
+// TestApplyDryRun_MCPMissingEnv: MCP with missing required env var → trailing [missing env: VAR1].
+func TestApplyDryRun_MCPMissingEnv(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	// Write a valid MCP config with a required env var.
+	mcpContent := "name: mcp-atlassian\ndescription: Atlassian MCP\ncommand: npx\nargs:\n  - -y\n  - mcp-atlassian\ntargets:\n  - claude-code\nenv:\n  - name: ATLASSIAN_TOKEN\n    description: Atlassian API token\n    required: true\n"
+	mcpDir := filepath.Join(workDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0755); err != nil {
+		t.Fatalf("mkdir mcp: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(mcpDir, "mcp-atlassian.yaml"), []byte(mcpContent), 0644); err != nil {
+		t.Fatalf("write mcp: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "mcp-atlassian") {
+		t.Errorf("expected MCP name in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "[missing env:") {
+		t.Errorf("expected '[missing env:' in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "ATLASSIAN_TOKEN") {
+		t.Errorf("expected env var name in output, got: %q", stdout)
+	}
+}
+
+// TestApplyDryRun_NothingToApply: skill in inventory already installed with identical content → "nothing to apply".
+func TestApplyDryRun_NothingToApply(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	skillContent := "---\nname: existing-skill\ndescription: Already installed\n---\n\n# Role\nDoes something.\n"
+
+	// Install same content in claude env.
+	installedPath := filepath.Join(fakeHome, ".claude", "skills", "existing-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(installedPath), 0755); err != nil {
+		t.Fatalf("mkdir installed skill: %v", err)
+	}
+	if err := os.WriteFile(installedPath, []byte(skillContent), 0644); err != nil {
+		t.Fatalf("write installed skill: %v", err)
+	}
+
+	// Write same content to inventory.
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "existing-skill.md"),
+		[]byte(skillContent),
+		0644,
+	); err != nil {
+		t.Fatalf("write inventory skill: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "nothing to apply") {
+		t.Errorf("expected 'nothing to apply' when env matches inventory, got: %q", stdout)
 	}
 }

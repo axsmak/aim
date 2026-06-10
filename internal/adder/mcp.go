@@ -1,6 +1,7 @@
 package adder
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,10 +12,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func addMCP(raw []byte, opts AddOptions) error {
+func addMCP(raw []byte, opts AddOptions) (AddResult, error) {
 	m, err := mcp.Parse(raw)
 	if err != nil {
-		return err
+		return AddResult{}, err
 	}
 
 	name := m.Name
@@ -33,34 +34,39 @@ func addMCP(raw []byte, opts AddOptions) error {
 
 	stripped, err := yaml.Marshal(m)
 	if err != nil {
-		return fmt.Errorf("marshal mcp: %w", err)
+		return AddResult{}, fmt.Errorf("marshal mcp: %w", err)
 	}
 
 	destPath := filepath.Join(opts.WorkDir, "mcp", name+".yaml")
 
 	if err := importer.CheckConflict(destPath, stripped, opts.Overwrite); err != nil {
-		return err
+		if errors.Is(err, importer.ErrIdentical) {
+			// File already exists with identical content — no-op.
+			// HasSecrets is false: secrets were already there from the previous add.
+			return AddResult{Name: name, Identical: true}, nil
+		}
+		return AddResult{}, err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
-		return err
+		return AddResult{}, err
 	}
 	if err := os.WriteFile(destPath, stripped, 0644); err != nil {
-		return err
+		return AddResult{}, err
 	}
 
 	if len(envValues) > 0 {
 		cfg, err := localconfig.Load(opts.WorkDir)
 		if err != nil {
-			return fmt.Errorf("load aim.local.yaml: %w", err)
+			return AddResult{}, fmt.Errorf("load aim.local.yaml: %w", err)
 		}
 		for _, ev := range envValues {
 			cfg.SetMCPEnv(name, ev.varName, ev.value)
 		}
 		if err := localconfig.Save(opts.WorkDir, cfg); err != nil {
-			return fmt.Errorf("save aim.local.yaml: %w", err)
+			return AddResult{}, fmt.Errorf("save aim.local.yaml: %w", err)
 		}
 	}
 
-	return nil
+	return AddResult{Name: name, Identical: false, HasSecrets: len(envValues) > 0}, nil
 }

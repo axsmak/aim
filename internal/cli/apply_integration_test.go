@@ -98,8 +98,8 @@ func TestApply_DoesNotAlterGitState(t *testing.T) {
 	if applyErr != nil {
 		t.Fatalf("aiman apply failed: %v", applyErr)
 	}
-	if !strings.Contains(stdout, "Applied:") {
-		t.Errorf("expected 'Applied:' in output, got: %q", stdout)
+	if !strings.Contains(stdout, "applied:") {
+		t.Errorf("expected 'applied:' in output, got: %q", stdout)
 	}
 
 	// Skill must be installed with the MODIFIED content (local working tree, not committed)

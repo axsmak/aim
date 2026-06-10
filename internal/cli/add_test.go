@@ -160,3 +160,99 @@ func TestAddMCP_NoArgs_Error(t *testing.T) {
 		t.Fatal("expected error when no args given, got nil")
 	}
 }
+
+func TestAddSkill_SuccessOutput_NewWrite(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	skillContent := "---\nname: my-skill\ndescription: A test skill\n---\n\n# Role\nDoes something useful.\n"
+	srcFile := filepath.Join(t.TempDir(), "my-skill.md")
+	if err := os.WriteFile(srcFile, []byte(skillContent), 0644); err != nil {
+		t.Fatalf("write source skill: %v", err)
+	}
+
+	stdout, _, err := runAddCmd(t, fakeHome, workDir, "skill", srcFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "added: skill my-skill\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestAddSkill_SuccessOutput_IdenticalNoOp(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	skillContent := "---\nname: my-skill\ndescription: A test skill\n---\n\n# Role\nDoes something useful.\n"
+	srcFile := filepath.Join(t.TempDir(), "my-skill.md")
+	if err := os.WriteFile(srcFile, []byte(skillContent), 0644); err != nil {
+		t.Fatalf("write source skill: %v", err)
+	}
+
+	// First add — new write.
+	if _, _, err := runAddCmd(t, fakeHome, workDir, "skill", srcFile); err != nil {
+		t.Fatalf("first add unexpected error: %v", err)
+	}
+
+	// Second add — identical no-op.
+	stdout, _, err := runAddCmd(t, fakeHome, workDir, "skill", srcFile)
+	if err != nil {
+		t.Fatalf("second add unexpected error: %v", err)
+	}
+
+	want := "up to date: skill my-skill \xc2\xb7 already identical\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestAddMCP_SuccessOutput_NewWrite(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	mcpContent := "name: jira\ndescription: Jira MCP\ncommand: npx\nargs:\n    - -y\n    - mcp-jira\ntargets:\n    - claude_code\nenv: []\n"
+	srcFile := filepath.Join(t.TempDir(), "jira.yaml")
+	if err := os.WriteFile(srcFile, []byte(mcpContent), 0644); err != nil {
+		t.Fatalf("write source mcp: %v", err)
+	}
+
+	stdout, _, err := runAddCmd(t, fakeHome, workDir, "mcp", srcFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "added: mcp jira\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestAddMCP_SuccessOutput_IdenticalNoOp(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	mcpContent := "name: jira\ndescription: Jira MCP\ncommand: npx\nargs:\n    - -y\n    - mcp-jira\ntargets:\n    - claude_code\nenv: []\n"
+	srcFile := filepath.Join(t.TempDir(), "jira.yaml")
+	if err := os.WriteFile(srcFile, []byte(mcpContent), 0644); err != nil {
+		t.Fatalf("write source mcp: %v", err)
+	}
+
+	// First add — new write.
+	if _, _, err := runAddCmd(t, fakeHome, workDir, "mcp", srcFile); err != nil {
+		t.Fatalf("first add unexpected error: %v", err)
+	}
+
+	// Second add — identical no-op.
+	stdout, _, err := runAddCmd(t, fakeHome, workDir, "mcp", srcFile)
+	if err != nil {
+		t.Fatalf("second add unexpected error: %v", err)
+	}
+
+	want := "up to date: mcp jira \xc2\xb7 already identical\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
