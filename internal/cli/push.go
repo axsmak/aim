@@ -72,14 +72,14 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 	}
 	hasErrors := false
 	for _, ve := range invalid {
-		fmt.Fprintf(errOut, "error: %s\n", ve)
-		hasErrors = true
+		if ve.Field == "body" {
+			fmt.Fprintf(errOut, "error: %s\n", ve)
+			hasErrors = true
+		} else {
+			fmt.Fprintf(errOut, "warning: %s\n", ve)
+		}
 	}
 	for _, s := range valid {
-		if s.Body == "" {
-			fmt.Fprintf(errOut, "error: skill %s has empty body\n", s.Name)
-			hasErrors = true
-		}
 		if s.Description == "" {
 			fmt.Fprintf(errOut, "warning: skill %s has no description\n", s.Name)
 		}
@@ -151,10 +151,6 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 	if len(shortHash) > 7 {
 		shortHash = shortHash[:7]
 	}
-	if len(mcpItems) > 0 {
-		fmt.Fprintf(out, "published: %s — %d skills, %d MCP servers\n", shortHash, len(valid), len(mcpItems))
-	} else {
-		fmt.Fprintf(out, "published: %s — %d skills\n", shortHash, len(valid))
-	}
+	fmt.Fprintln(out, FormatSuccess("published", shortHash, len(valid), len(mcpItems), 0))
 	return nil
 }

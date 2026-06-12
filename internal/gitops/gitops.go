@@ -33,6 +33,10 @@ type Ops interface {
 	// These files would be silently overwritten by git reset --hard.
 	UntrackedConflictsWithRef(dir, ref string, paths []string) ([]string, error)
 	CountAheadBehind(dir, base, ref string) (ahead, behind int, err error)
+	// DiffNameStatus returns "status\tpath" lines for managed paths between ref and working tree.
+	DiffNameStatus(dir, ref string, paths []string) ([]string, error)
+	// ListUntrackedInPaths returns untracked file paths under the given paths.
+	ListUntrackedInPaths(dir string, paths []string) ([]string, error)
 }
 
 // ExecOps implements Ops by calling git as an external command.
@@ -241,6 +245,35 @@ func (e *ExecOps) UntrackedConflictsWithRef(dir, ref string, paths []string) ([]
 		}
 	}
 	return conflicts, nil
+}
+
+func (e *ExecOps) DiffNameStatus(dir, ref string, paths []string) ([]string, error) {
+	args := append([]string{"diff", "--name-status", ref, "--"}, paths...)
+	out, err := run(dir, args...)
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+func (e *ExecOps) ListUntrackedInPaths(dir string, paths []string) ([]string, error) {
+	args := append([]string{"status", "--porcelain", "--untracked-files=all", "--"}, paths...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	raw, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git status --porcelain: %w\n%s", err, raw)
+	}
+	var result []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "??") {
+			result = append(result, strings.TrimSpace(line[3:]))
+		}
+	}
+	return result, nil
 }
 
 // ManagedStatus returns git status --porcelain lines for managed paths.

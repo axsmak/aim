@@ -2,14 +2,22 @@ package importer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 )
+
+// ErrIdentical is returned by CheckConflict when the destination file already
+// exists and its content is byte-for-byte identical to the incoming content.
+// It is a signal value (like io.EOF), not a real error — callers should handle
+// it explicitly rather than propagating it as a failure.
+var ErrIdentical = errors.New("identical content")
 
 type ConflictError struct {
 	Path string
 }
 
+// If this message changes, update the import-specific hint in internal/cli/import.go (errors.As wrap).
 func (e ConflictError) Error() string {
 	return fmt.Sprintf("%s already exists with different content; use --overwrite to replace or --name to save as a new item", e.Path)
 }
@@ -34,7 +42,7 @@ func CheckConflict(path string, incoming []byte, overwrite bool) error {
 		return err
 	}
 	if bytes.Equal(existing, incoming) {
-		return nil
+		return ErrIdentical
 	}
 	if overwrite {
 		return nil

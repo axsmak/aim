@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ func newImportCmd() *cobra.Command {
 
 func newImportSkillCmd() *cobra.Command {
 	var from string
-	var dryRun bool
+	var printOnly bool
 	var overwrite bool
 	var targets string
 
@@ -73,7 +74,8 @@ func newImportSkillCmd() *cobra.Command {
 				for i, m := range matches {
 					sources[i] = m.Source
 				}
-				return importer.AmbiguousError{Name: name, Sources: sources}
+				ae := importer.AmbiguousError{Name: name, Sources: sources}
+				return fmt.Errorf("%s: found in multiple sources %v; rename or remove duplicates, or import the file directly with aiman add skill <file>", ae.Name, ae.Sources)
 			}
 
 			found := matches[0]
@@ -82,27 +84,40 @@ func newImportSkillCmd() *cobra.Command {
 				return err
 			}
 
-			if dryRun {
+			if printOnly {
 				_, err := cmd.OutOrStdout().Write(found.Raw)
 				return err
 			}
 
 			destPath := filepath.Join(workDir, "skills", found.Name+".md")
 
+			// If ConflictError message in conflict.go changes, update this import-specific hint too.
 			if err := importer.CheckConflict(destPath, found.Raw, overwrite); err != nil {
+				if errors.Is(err, importer.ErrIdentical) {
+					fmt.Fprintf(cmd.OutOrStdout(), "up to date: skill %s · already identical\n", found.Name)
+					return nil
+				}
+				var ce importer.ConflictError
+				if errors.As(err, &ce) {
+					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
+				}
 				return err
 			}
 
 			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 				return err
 			}
-			return os.WriteFile(destPath, found.Raw, 0644)
+			if err := os.WriteFile(destPath, found.Raw, 0644); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "imported: skill %s · from %s\n", found.Name, from)
+			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&from, "from", "", "source AI environment (claude-code, cursor, codex)")
 	_ = cmd.MarkFlagRequired("from")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print skill content without writing to disk")
+	cmd.Flags().BoolVar(&printOnly, "print", false, "print skill content without writing to disk")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace existing skill if content differs")
 	cmd.Flags().StringVar(&targets, "targets", "", "target environments (ignored for skills)")
 
@@ -113,7 +128,7 @@ var allAdapterNames = []string{"claude-code", "cursor", "codex"}
 
 func newImportMCPCmd() *cobra.Command {
 	var from string
-	var dryRun bool
+	var printOnly bool
 	var overwrite bool
 	var targets string
 
@@ -186,11 +201,20 @@ func newImportMCPCmd() *cobra.Command {
 
 			destPath := filepath.Join(workDir, "mcp", name+".yaml")
 
+			// If ConflictError message in conflict.go changes, update this import-specific hint too.
 			if err := importer.CheckConflict(destPath, yamlBytes, overwrite); err != nil {
+				if errors.Is(err, importer.ErrIdentical) {
+					fmt.Fprintf(cmd.OutOrStdout(), "up to date: mcp %s · already identical\n", name)
+					return nil
+				}
+				var ce importer.ConflictError
+				if errors.As(err, &ce) {
+					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
+				}
 				return err
 			}
 
-			if dryRun {
+			if printOnly {
 				_, err := cmd.OutOrStdout().Write(yamlBytes)
 				return err
 			}
@@ -215,13 +239,18 @@ func newImportMCPCmd() *cobra.Command {
 				}
 			}
 
+			if len(secrets) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "imported: mcp %s · from %s · secrets stored in aim.local.yaml\n", name, from)
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "imported: mcp %s · from %s\n", name, from)
+			}
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&from, "from", "", "source AI environment (claude-code, cursor, codex)")
 	_ = cmd.MarkFlagRequired("from")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print MCP config without writing to disk")
+	cmd.Flags().BoolVar(&printOnly, "print", false, "print MCP config without writing to disk")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace existing MCP config if content differs")
 	cmd.Flags().StringVar(&targets, "targets", "", `target environments; use "all" for all adapters`)
 

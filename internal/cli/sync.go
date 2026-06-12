@@ -141,20 +141,19 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 			shortHash = shortHash[:7]
 		}
 		fmt.Fprintf(out, "[dry-run] would apply: %s\n", shortHash)
-		fmt.Fprintln(out, "Current local inventory (before reset):")
 		skills, _, err := skill.ReadAll(skillsDir)
 		if err == nil && len(skills) > 0 {
-			fmt.Fprintf(out, "Skills (%d):\n", len(skills))
+			fmt.Fprintf(out, "  Skills (%d):\n", len(skills))
 			for _, s := range skills {
-				fmt.Fprintf(out, "  - %s\n", s.Name)
+				fmt.Fprintf(out, "    - %s\n", s.Name)
 			}
 		}
 		mcpItems, _ := mcp.ParseDir(mcpDirFull)
 		if len(mcpItems) > 0 {
-			fmt.Fprintf(out, "MCP servers (%d):\n", len(mcpItems))
+			fmt.Fprintf(out, "  MCP servers (%d):\n", len(mcpItems))
 			for _, m := range mcpItems {
 				envStatus := mcpEnvStatus(m, cfg)
-				fmt.Fprintf(out, "  - %s → %s  %s\n", m.Name, strings.Join(m.Targets, ", "), envStatus)
+				fmt.Fprintf(out, "    - %s → %s  %s\n", m.Name, strings.Join(m.Targets, ", "), envStatus)
 			}
 		}
 		return nil
@@ -197,7 +196,7 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 	if combinedErr != nil {
 		return combinedErr
 	}
-	fmt.Fprintf(out, "Synced: %s — %d skills, %d MCP servers in %d environments\n", shortHash, skillCount, mcpCount, max(envCount, mcpEnvCount))
+	fmt.Fprintln(out, FormatSuccess("synced", shortHash, skillCount, mcpCount, max(envCount, mcpEnvCount)))
 	return nil
 }
 
@@ -233,6 +232,7 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 	}
 
 	cfgChanged := false
+	installedEnvCount := 0
 
 	for _, a := range adapter.DefaultAdapters(cfg) {
 		baseDir, found := a.Detect(homeDir)
@@ -286,12 +286,11 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 				continue
 			}
 		}
-		if len(valid) > 0 {
-			fmt.Fprintf(out, "applied: %d skills in %s\n", len(valid), a.Name())
-		}
-		if len(mcpItems) > 0 {
-			fmt.Fprintf(out, "applied: %d MCP servers in %s\n", len(mcpItems), a.Name())
-		}
+		installedEnvCount++
+	}
+
+	if !dryRun && installedEnvCount > 0 {
+		fmt.Fprintln(out, FormatSuccess("applied", "", len(valid), len(mcpItems), installedEnvCount))
 	}
 
 	if cfgChanged {

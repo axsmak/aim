@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,8 +28,8 @@ func TestCheckConflict_SameContent(t *testing.T) {
 	}
 
 	err := CheckConflict(path, content, false)
-	if err != nil {
-		t.Fatalf("expected nil for identical content, got %v", err)
+	if !errors.Is(err, ErrIdentical) {
+		t.Fatalf("expected ErrIdentical for identical content, got %v", err)
 	}
 }
 

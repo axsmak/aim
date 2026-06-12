@@ -121,7 +121,7 @@ func TestImportMCP_HappyPath(t *testing.T) {
 	}
 }
 
-// TestImportMCP_DryRun verifies that --dry-run prints YAML to stdout without writing files.
+// TestImportMCP_DryRun verifies that --print prints YAML to stdout without writing files.
 func TestImportMCP_DryRun(t *testing.T) {
 	fakeHome := t.TempDir()
 	workDir := t.TempDir()
@@ -130,7 +130,7 @@ func TestImportMCP_DryRun(t *testing.T) {
 		"jira": jiraServerEntry(),
 	})
 
-	stdout, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "jira", "--from", "cursor", "--dry-run")
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "jira", "--from", "cursor", "--print")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

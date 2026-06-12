@@ -55,7 +55,7 @@ func runSwitch(path, homeDir string, out io.Writer) error {
 	if err := globalconfig.Save(homeDir, globalconfig.Config{Repo: absPath}); err != nil {
 		return fmt.Errorf("cannot update global config: %w", err)
 	}
-	fmt.Fprintf(out, "switched to %s\n", absPath)
+	fmt.Fprintf(out, "switched: %s\n", absPath)
 	return nil
 }
 

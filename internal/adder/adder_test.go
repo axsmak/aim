@@ -28,9 +28,15 @@ Skill body content here.
 
 func TestAdd_ValidSkill_FileWritten(t *testing.T) {
 	dir := t.TempDir()
-	err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
+	result, err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Name != "my-skill" {
+		t.Fatalf("expected Name 'my-skill', got %q", result.Name)
+	}
+	if result.Identical {
+		t.Fatal("expected Identical=false for new write")
 	}
 	dest := filepath.Join(dir, "skills", "my-skill.md")
 	got, err := os.ReadFile(dest)
@@ -44,7 +50,7 @@ func TestAdd_ValidSkill_FileWritten(t *testing.T) {
 
 func TestAdd_SkillFromBytesReader(t *testing.T) {
 	dir := t.TempDir()
-	err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
+	_, err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -52,7 +58,7 @@ func TestAdd_SkillFromBytesReader(t *testing.T) {
 
 func TestAdd_MissingNameNoFlag_Error(t *testing.T) {
 	dir := t.TempDir()
-	err := Add("skill", bytes.NewReader([]byte(noNameSkill)), AddOptions{WorkDir: dir})
+	_, err := Add("skill", bytes.NewReader([]byte(noNameSkill)), AddOptions{WorkDir: dir})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -69,7 +75,7 @@ func TestAdd_ConflictWithoutOverwrite_ConflictError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
+	_, err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
 	if err == nil {
 		t.Fatal("expected ConflictError, got nil")
 	}
@@ -90,7 +96,7 @@ func TestAdd_ConflictWithOverwrite_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir, Overwrite: true})
+	_, err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir, Overwrite: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,15 +106,39 @@ func TestAdd_ConflictWithOverwrite_Success(t *testing.T) {
 	}
 }
 
+func TestAdd_IdenticalContent_NoOpResult(t *testing.T) {
+	dir := t.TempDir()
+	// First add — new write.
+	result1, err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("first add unexpected error: %v", err)
+	}
+	if result1.Identical {
+		t.Fatal("first add must not be identical")
+	}
+
+	// Second add with identical content — no-op.
+	result2, err := Add("skill", bytes.NewReader([]byte(validSkill)), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("second add unexpected error: %v", err)
+	}
+	if !result2.Identical {
+		t.Fatal("second add with identical content must set Identical=true")
+	}
+	if result2.Name != "my-skill" {
+		t.Fatalf("expected Name 'my-skill', got %q", result2.Name)
+	}
+}
+
 func TestAdd_MCPType_InvalidYAML_Error(t *testing.T) {
-	err := Add("mcp", bytes.NewReader([]byte("!!invalid: yaml: {")), AddOptions{WorkDir: t.TempDir()})
+	_, err := Add("mcp", bytes.NewReader([]byte("!!invalid: yaml: {")), AddOptions{WorkDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected parse error, got nil")
 	}
 }
 
 func TestAdd_UnknownType_Error(t *testing.T) {
-	err := Add("unknown", bytes.NewReader(nil), AddOptions{})
+	_, err := Add("unknown", bytes.NewReader(nil), AddOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -119,8 +149,54 @@ func TestAdd_UnknownType_Error(t *testing.T) {
 
 func TestAdd_EmptyBytes_Error(t *testing.T) {
 	dir := t.TempDir()
-	err := Add("skill", bytes.NewReader([]byte{}), AddOptions{WorkDir: dir})
+	_, err := Add("skill", bytes.NewReader([]byte{}), AddOptions{WorkDir: dir})
 	if err == nil {
 		t.Fatal("expected error for empty input, got nil")
+	}
+}
+
+func TestAdd_MCPWithSecrets_HasSecretsTrue(t *testing.T) {
+	dir := t.TempDir()
+	result, err := Add("mcp", bytes.NewReader([]byte(validMCPWithEnvValues)), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.HasSecrets {
+		t.Fatal("expected HasSecrets=true when MCP has env values")
+	}
+	if result.Identical {
+		t.Fatal("expected Identical=false for new write")
+	}
+}
+
+func TestAdd_MCPNoSecrets_HasSecretsFalse(t *testing.T) {
+	dir := t.TempDir()
+	result, err := Add("mcp", bytes.NewReader([]byte(validMCPNoEnvValues)), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.HasSecrets {
+		t.Fatal("expected HasSecrets=false when MCP has no env values")
+	}
+}
+
+func TestAdd_MCPIdenticalContent_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	// First add — new write.
+	result1, err := Add("mcp", bytes.NewReader([]byte(validMCPNoEnvValues)), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("first add unexpected error: %v", err)
+	}
+	if result1.Identical {
+		t.Fatal("first add must not be identical")
+	}
+
+	// Second add with identical content — no-op.
+	result2, err := Add("mcp", bytes.NewReader([]byte(validMCPNoEnvValues)), AddOptions{WorkDir: dir})
+	if err != nil {
+		t.Fatalf("second add unexpected error: %v", err)
+	}
+	if !result2.Identical {
+		t.Fatal("second add with identical content must set Identical=true")
 	}
 }
