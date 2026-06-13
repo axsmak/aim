@@ -152,8 +152,12 @@ func TestSync_MCP_DryRun_DoesNotCreateFiles(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(stdout, "test-server") {
-		t.Errorf("expected test-server in dry-run output, got: %s", stdout)
+	// ADR-0003 5.6 / 4.3: local-mode dry-run emits a single summary line, not per-server listing.
+	if !strings.Contains(stdout, "[dry-run]") {
+		t.Errorf("expected [dry-run] prefix in output, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "MCP server") {
+		t.Errorf("expected 'MCP server' count in dry-run output, got: %s", stdout)
 	}
 
 	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")

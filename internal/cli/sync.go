@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -38,20 +37,22 @@ func newSyncCmd() *cobra.Command {
 	return cmd
 }
 
+// syncCleanPaths are the paths used for both git clean and the --force report.
+// ADR-0003 5.3 (Н-5): single constant — report and clean always use identical paths.
+var syncCleanPaths = []string{"skills/", "mcp/"}
+
 func runSync(dryRun, force bool, homeDir, skillsDir, mcpDir, workDir string, in io.Reader, out, errOut io.Writer) error {
 	if _, err := os.Stat(filepath.Join(workDir, ".git")); err == nil {
-		return runGitSync(dryRun, force, homeDir, mcpDir, workDir, in, out, errOut)
+		return runGitSync(dryRun, force, homeDir, mcpDir, workDir, gitops.New(), in, out, errOut)
 	}
 	return runLocalSync(dryRun, homeDir, skillsDir, mcpDir, workDir, in, out, errOut)
 }
 
-func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reader, out, errOut io.Writer) error {
+func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, git gitops.Ops, in io.Reader, out, errOut io.Writer) error {
 	cfg, err := localconfig.Load(workDir)
 	if err != nil {
 		return fmt.Errorf("cannot parse aim.local.yaml: %w", err)
 	}
-
-	git := gitops.New()
 
 	dirtyTracked, err := git.HasDirtyWorktree(workDir)
 	if err != nil {
@@ -64,10 +65,15 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 	if dirtyTracked {
 		return fmt.Errorf("tracked or staged changes detected — commit, stash, or push before sync")
 	}
+	// ADR-0003 5.3: snapshot before clean, report after — same paths (Н-5).
+	var forceDiscarded []string
 	if dirtyUntracked && force {
-		cmd := exec.Command("git", "-C", workDir, "clean", "-fd", "--", "skills/", "mcp/")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git clean failed: %w\n%s", err, out)
+		forceDiscarded, err = git.ListUntrackedInPaths(workDir, syncCleanPaths)
+		if err != nil {
+			return fmt.Errorf("cannot list untracked files: %w", err)
+		}
+		if err := git.CleanUntracked(workDir, syncCleanPaths); err != nil {
+			return fmt.Errorf("git clean failed: %w", err)
 		}
 		dirtyUntracked = false
 	}
@@ -133,30 +139,29 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 
 	if dryRun {
 		if headHash == originHash {
-			fmt.Fprintln(out, "[dry-run] aiman sync: already up to date — nothing to apply")
+			fmt.Fprintln(out, "[dry-run] nothing to sync — environments up to date with origin/main")
 			return nil
 		}
-		shortHash := originHash
-		if len(shortHash) > 7 {
-			shortHash = shortHash[:7]
+		// ADR-0003 5.6 / 4.1: dry-run shows delta HEAD→origin/main, not full inventory.
+		deltaLines, deltaErr := git.DiffSyncDelta(workDir)
+		if deltaErr != nil {
+			return fmt.Errorf("cannot compute sync delta: %w", deltaErr)
 		}
-		fmt.Fprintf(out, "[dry-run] would apply: %s\n", shortHash)
-		skills, _, err := skill.ReadAll(skillsDir)
-		if err == nil && len(skills) > 0 {
-			fmt.Fprintf(out, "  Skills (%d):\n", len(skills))
-			for _, s := range skills {
-				fmt.Fprintf(out, "    - %s\n", s.Name)
-			}
-		}
-		mcpItems, _ := mcp.ParseDir(mcpDirFull)
-		if len(mcpItems) > 0 {
-			fmt.Fprintf(out, "  MCP servers (%d):\n", len(mcpItems))
-			for _, m := range mcpItems {
-				envStatus := mcpEnvStatus(m, cfg)
-				fmt.Fprintf(out, "    - %s → %s  %s\n", m.Name, strings.Join(m.Targets, ", "), envStatus)
-			}
-		}
+		envs := countEnvs(homeDir, cfg)
+		fmt.Fprintf(out, "[dry-run] would sync %s from origin/main → %s:\n",
+			Plural(len(deltaLines), "change"),
+			Plural(envs, "environment"))
+		PrintDeltaBlock(out, deltaLines)
 		return nil
+	}
+
+	// ADR-0003 5.1: snapshot delta before ResetHard — the diff is gone after reset.
+	var syncDeltaLines []string
+	if needsReset {
+		syncDeltaLines, err = git.DiffSyncDelta(workDir)
+		if err != nil {
+			return fmt.Errorf("cannot compute sync delta: %w", err)
+		}
 	}
 
 	if needsReset {
@@ -196,7 +201,18 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, in io.Reade
 	if combinedErr != nil {
 		return combinedErr
 	}
+
+	// ADR-0003 5.3: print --force report before success line.
+	if len(forceDiscarded) > 0 {
+		fmt.Fprintln(out, "discarded untracked files (--force):")
+		PrintDeltaBlock(out, forceDiscarded)
+	}
+
 	fmt.Fprintln(out, FormatSuccess("synced", shortHash, skillCount, mcpCount, max(envCount, mcpEnvCount)))
+
+	// ADR-0003 5.1: print delta block after success line (empty = no block).
+	PrintDeltaBlock(out, syncDeltaLines)
+
 	return nil
 }
 
@@ -227,7 +243,18 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 	}
 
 	if len(valid) == 0 && len(mcpItems) == 0 {
-		fmt.Fprintln(out, "no valid skills or MCP servers to install")
+		// ADR-0003 5.6 / 4.4: consistent "nothing to …" phrasing.
+		fmt.Fprintln(out, "nothing to sync")
+		return nil
+	}
+
+	if dryRun {
+		// ADR-0003 5.6 / 4.3: single [dry-run] line, not per-environment listing.
+		envCount := countEnvs(homeDir, cfg)
+		fmt.Fprintf(out, "[dry-run] would sync %s, %s → %s\n",
+			Plural(len(valid), "skill"),
+			Plural(len(mcpItems), "MCP server"),
+			Plural(envCount, "environment"))
 		return nil
 	}
 
@@ -238,25 +265,6 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 		baseDir, found := a.Detect(homeDir)
 		if !found {
 			fmt.Fprintf(errOut, "warning: %s not found\n", a.Name())
-			continue
-		}
-
-		if dryRun {
-			if len(valid) > 0 {
-				fmt.Fprintf(out, "[dry-run] would install in %s (%d skills):\n", a.Name(), len(valid))
-				for _, s := range valid {
-					fmt.Fprintf(out, "  - %s\n", s.Name)
-				}
-			}
-			if len(mcpItems) > 0 {
-				for _, m := range mcpItems {
-					if !containsTarget(m.Targets, a.Name()) {
-						continue
-					}
-					envStatus := mcpEnvStatus(m, cfg)
-					fmt.Fprintf(out, "[dry-run] MCP %s → %s  %s\n", m.Name, a.Name(), envStatus)
-				}
-			}
 			continue
 		}
 
@@ -289,8 +297,9 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 		installedEnvCount++
 	}
 
-	if !dryRun && installedEnvCount > 0 {
-		fmt.Fprintln(out, FormatSuccess("applied", "", len(valid), len(mcpItems), installedEnvCount))
+	if installedEnvCount > 0 {
+		// ADR-0003 5.6 / 4.2: local-mode uses "synced:" not "applied:".
+		fmt.Fprintln(out, FormatSuccess("synced", "", len(valid), len(mcpItems), installedEnvCount))
 	}
 
 	if cfgChanged {
@@ -418,6 +427,18 @@ func isInGitignore(workDir, filename string) bool {
 		}
 	}
 	return false
+}
+
+// countEnvs returns the number of detected AI environments for the given config.
+// Used by dry-run paths to show "→ K environments" without actually installing.
+func countEnvs(homeDir string, cfg localconfig.Config) int {
+	count := 0
+	for _, a := range adapter.DefaultAdapters(cfg) {
+		if _, found := a.Detect(homeDir); found {
+			count++
+		}
+	}
+	return count
 }
 
 func max(a, b int) int {
