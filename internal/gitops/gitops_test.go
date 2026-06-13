@@ -880,3 +880,111 @@ func TestCountAheadBehind_behind(t *testing.T) {
 		t.Fatalf("expected behind=1, got %d", behind)
 	}
 }
+
+// TestDiffSyncDelta_noChanges verifies DiffSyncDelta returns nil when HEAD == origin/main.
+func TestDiffSyncDelta_noChanges(t *testing.T) {
+	bareDir, workDir := setupRepo(t)
+	initialCommit(t, workDir, bareDir)
+
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "x.md"), []byte("skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workDir, "add", ".")
+	runGit(t, workDir, "commit", "-m", "add skill")
+	runGit(t, workDir, "push", "origin", "main")
+	runGit(t, workDir, "fetch", "origin")
+
+	ops := gitops.New()
+	lines, err := ops.DiffSyncDelta(workDir)
+	if err != nil {
+		t.Fatalf("DiffSyncDelta: %v", err)
+	}
+	if len(lines) != 0 {
+		t.Fatalf("expected no delta (HEAD == origin/main), got: %v", lines)
+	}
+}
+
+// TestDiffSyncDelta_withChanges verifies DiffSyncDelta returns "M path" and "A path"
+// lines when origin/main is ahead of HEAD.
+func TestDiffSyncDelta_withChanges(t *testing.T) {
+	bareDir, workDir := setupRepo(t)
+	initialCommit(t, workDir, bareDir)
+
+	// Push an initial skill from workDir
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "existing.md"), []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workDir, "add", ".")
+	runGit(t, workDir, "commit", "-m", "initial skill")
+	runGit(t, workDir, "push", "origin", "main")
+
+	// From a second clone, push a new commit: modify existing + add new skill
+	work2 := t.TempDir()
+	runGit(t, "", "clone", bareDir, work2)
+	runGit(t, work2, "config", "user.email", "test@test.com")
+	runGit(t, work2, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(work2, "skills", "existing.md"), []byte("v2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work2, "skills", "new.md"), []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, work2, "add", ".")
+	runGit(t, work2, "commit", "-m", "update and add skill")
+	runGit(t, work2, "push", "origin", "main")
+
+	// Fetch so workDir sees the new origin/main without resetting HEAD
+	runGit(t, workDir, "fetch", "origin")
+
+	ops := gitops.New()
+	lines, err := ops.DiffSyncDelta(workDir)
+	if err != nil {
+		t.Fatalf("DiffSyncDelta: %v", err)
+	}
+	if len(lines) == 0 {
+		t.Fatal("expected delta lines, got none")
+	}
+
+	var hasModified, hasAdded bool
+	for _, l := range lines {
+		if strings.Contains(l, "existing.md") && strings.HasPrefix(l, "M ") {
+			hasModified = true
+		}
+		if strings.Contains(l, "new.md") && strings.HasPrefix(l, "A ") {
+			hasAdded = true
+		}
+	}
+	if !hasModified {
+		t.Errorf("expected 'M skills/existing.md' in delta, got: %v", lines)
+	}
+	if !hasAdded {
+		t.Errorf("expected 'A skills/new.md' in delta, got: %v", lines)
+	}
+}
+
+// TestCleanUntracked verifies CleanUntracked removes untracked files under the given paths.
+func TestCleanUntracked(t *testing.T) {
+	dir := setupLocalRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	untrackedFile := filepath.Join(dir, "skills", "draft.md")
+	if err := os.WriteFile(untrackedFile, []byte("untracked"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ops := gitops.New()
+	if err := ops.CleanUntracked(dir, []string{"skills/"}); err != nil {
+		t.Fatalf("CleanUntracked: %v", err)
+	}
+
+	if _, err := os.Stat(untrackedFile); !os.IsNotExist(err) {
+		t.Error("expected untracked file to be removed by CleanUntracked")
+	}
+}

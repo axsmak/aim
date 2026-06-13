@@ -37,6 +37,13 @@ type Ops interface {
 	DiffNameStatus(dir, ref string, paths []string) ([]string, error)
 	// ListUntrackedInPaths returns untracked file paths under the given paths.
 	ListUntrackedInPaths(dir string, paths []string) ([]string, error)
+	// DiffSyncDelta returns formatted "X path" lines for skills/ and mcp/ between HEAD and
+	// origin/main. Must be called before ResetHard — the diff is gone after reset.
+	// ADR-0003 5.1: one function shared by dry-run (4.1) and result reporting (5.1).
+	DiffSyncDelta(workDir string) ([]string, error)
+	// CleanUntracked removes untracked files in paths via git clean -fd.
+	// ADR-0003 5.3 (Н-5): caller must pass the same paths slice used for reporting.
+	CleanUntracked(workDir string, paths []string) error
 }
 
 // ExecOps implements Ops by calling git as an external command.
@@ -309,4 +316,51 @@ func (e *ExecOps) CountAheadBehind(dir, base, ref string) (ahead, behind int, er
 		return 0, 0, fmt.Errorf("parse behind count %q: %w", behindOut, err)
 	}
 	return ahead, behind, nil
+}
+
+// syncDeltaPaths are the paths used by both DiffSyncDelta and CleanUntracked.
+// ADR-0003 5.3 (Н-5): single constant — report and clean always use identical paths.
+var syncDeltaPaths = []string{"skills/", "mcp/"}
+
+// DiffSyncDelta returns formatted "X path" lines for skills/ and mcp/ between HEAD and
+// origin/main. Must be called before ResetHard — the diff is gone after reset.
+// ADR-0003 5.1: one function shared by dry-run (4.1) and result reporting (5.1).
+func (e *ExecOps) DiffSyncDelta(workDir string) ([]string, error) {
+	args := append([]string{"diff", "--name-status", "HEAD", "origin/main", "--"}, syncDeltaPaths...)
+	out, err := run(workDir, args...)
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	raw := strings.Split(out, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// git outputs: "M\tskills/foo.md" — reformat to "M skills/foo.md"
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		status := strings.TrimSpace(parts[0])
+		path := strings.TrimSpace(parts[1])
+		// Normalise rename similarity score (e.g. "R100") to "R"
+		if len(status) > 1 && (status[0] == 'R' || status[0] == 'C') {
+			status = string(status[0])
+		}
+		lines = append(lines, status+" "+path)
+	}
+	return lines, nil
+}
+
+// CleanUntracked removes untracked files under paths via git clean -fd.
+// ADR-0003 5.3 (Н-5): caller must pass the same paths slice used for reporting.
+func (e *ExecOps) CleanUntracked(workDir string, paths []string) error {
+	args := append([]string{"clean", "-fd", "--"}, paths...)
+	_, err := run(workDir, args...)
+	return err
 }
