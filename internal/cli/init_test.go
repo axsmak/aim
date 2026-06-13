@@ -78,6 +78,8 @@ func (f *fakeGitOps) DiffNameStatus(dir, ref string, paths []string) ([]string, 
 func (f *fakeGitOps) ListUntrackedInPaths(dir string, paths []string) ([]string, error) {
 	return f.listUntrackedResult, f.listUntrackedErr
 }
+func (f *fakeGitOps) DiffSyncDelta(workDir string) ([]string, error) { return nil, nil }
+func (f *fakeGitOps) CleanUntracked(workDir string, paths []string) error { return nil }
 
 var _ gitops.Ops = (*fakeGitOps)(nil)
 

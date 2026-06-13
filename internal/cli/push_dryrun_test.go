@@ -61,7 +61,7 @@ func TestPushDryRun_untrackedSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(output, "[dry-run] aiman push: would publish managed changes") {
+	if !strings.Contains(output, "[dry-run] would publish managed changes") {
 		t.Errorf("expected publish-intent header, got: %q", output)
 	}
 	if !strings.Contains(output, "skills/wiki.md") {
@@ -70,7 +70,7 @@ func TestPushDryRun_untrackedSkill(t *testing.T) {
 	if !strings.Contains(output, "??") {
 		t.Errorf("expected untracked marker '??' in output, got: %q", output)
 	}
-	if !strings.Contains(output, "Validated inventory:") {
+	if !strings.Contains(output, "validated inventory:") {
 		t.Errorf("expected inventory summary, got: %q", output)
 	}
 	if strings.Contains(output, "no changes applied") {
@@ -133,7 +133,7 @@ func TestPushDryRun_stagedSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(output, "[dry-run] aiman push: would publish managed changes") {
+	if !strings.Contains(output, "[dry-run] would publish managed changes") {
 		t.Errorf("expected publish-intent header, got: %q", output)
 	}
 	if !strings.Contains(output, "skills/wiki.md") {
