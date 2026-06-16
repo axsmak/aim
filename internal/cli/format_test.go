@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -151,6 +152,93 @@ func TestTruncateDelta(t *testing.T) {
 		want := "  … and 1 more"
 		if got[20] != want {
 			t.Errorf("counter line: got %q, want %q", got[20], want)
+		}
+	})
+}
+
+func TestPrintDeltaBlock(t *testing.T) {
+	makeLines := func(n int) []string {
+		lines := make([]string, n)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("A skills/skill-%02d.md", i+1)
+		}
+		return lines
+	}
+
+	t.Run("empty", func(t *testing.T) {
+		var w bytes.Buffer
+		PrintDeltaBlock(&w, []string{})
+		if w.String() != "" {
+			t.Errorf("empty slice: want no output, got %q", w.String())
+		}
+	})
+
+	t.Run("below_threshold", func(t *testing.T) {
+		var w bytes.Buffer
+		lines := makeLines(3)
+		PrintDeltaBlock(&w, lines)
+		got := w.String()
+		wantLines := []string{
+			"  A skills/skill-01.md",
+			"  A skills/skill-02.md",
+			"  A skills/skill-03.md",
+		}
+		want := strings.Join(wantLines, "\n") + "\n"
+		if got != want {
+			t.Errorf("below_threshold:\n  got:  %q\n  want: %q", got, want)
+		}
+		if strings.Contains(got, "more") {
+			t.Errorf("below_threshold: unexpected truncation line")
+		}
+	})
+
+	t.Run("at_threshold", func(t *testing.T) {
+		var w bytes.Buffer
+		lines := makeLines(20)
+		PrintDeltaBlock(&w, lines)
+		got := w.String()
+		outLines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+		if len(outLines) != 20 {
+			t.Errorf("at_threshold: want 20 lines, got %d", len(outLines))
+		}
+		if strings.Contains(got, "more") {
+			t.Errorf("at_threshold: unexpected truncation line")
+		}
+		for i, line := range outLines {
+			if !strings.HasPrefix(line, "  ") {
+				t.Errorf("at_threshold: line %d missing 2-space indent: %q", i, line)
+			}
+		}
+	})
+
+	t.Run("above_threshold", func(t *testing.T) {
+		var w bytes.Buffer
+		lines := makeLines(23)
+		PrintDeltaBlock(&w, lines)
+		got := w.String()
+		outLines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+		if len(outLines) != 21 {
+			t.Errorf("above_threshold: want 21 lines (20 + truncation), got %d", len(outLines))
+		}
+		wantLast := "  … and 3 more"
+		if outLines[20] != wantLast {
+			t.Errorf("above_threshold: last line:\n  got:  %q\n  want: %q", outLines[20], wantLast)
+		}
+		for i := 0; i < 20; i++ {
+			if !strings.HasPrefix(outLines[i], "  ") {
+				t.Errorf("above_threshold: line %d missing 2-space indent: %q", i, outLines[i])
+			}
+		}
+	})
+
+	t.Run("with_qualifier", func(t *testing.T) {
+		var w bytes.Buffer
+		lines := []string{`M skills/x.md  (updated in staging)`}
+		PrintDeltaBlock(&w, lines)
+		got := w.String()
+		want := "  M skills/x.md  (updated in staging)\n"
+		if got != want {
+			t.Errorf("with_qualifier:\n  got:  %q\n  want: %q", got, want)
 		}
 	})
 }

@@ -110,19 +110,25 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 			return fmt.Errorf("dry-run: could not read managed paths status: %w", err)
 		}
 		if len(lines) == 0 {
-			fmt.Fprintln(out, "[dry-run] aiman push: nothing to publish — working tree is clean")
+			fmt.Fprintln(out, "[dry-run] nothing to publish — working tree is clean")
 		} else {
-			fmt.Fprintln(out, "[dry-run] aiman push: would publish managed changes")
-			for _, l := range lines {
-				fmt.Fprintf(out, "  %s\n", l)
-			}
+			fmt.Fprintln(out, "[dry-run] would publish managed changes:")
+			PrintDeltaBlock(out, lines)
 		}
-		invLine := fmt.Sprintf("Validated inventory: %d skills", len(valid))
+		invLine := fmt.Sprintf("  validated inventory: %d skills", len(valid))
 		if len(mcpItems) > 0 {
 			invLine += fmt.Sprintf(", %d MCP servers", len(mcpItems))
 		}
 		fmt.Fprintln(out, invLine)
 		return nil
+	}
+
+	// Snapshot managed-paths delta before commit — after commit the working tree is clean.
+	// ADR-0003 5.1: print change composition after the success line.
+	deltaLines, err := gitops.ManagedStatus(workDir)
+	if err != nil {
+		// Non-fatal: delta is informational; proceed with the publish.
+		fmt.Fprintf(errOut, "warning: could not read managed paths status: %v\n", err)
 	}
 
 	msg := "aim: publish " + time.Now().UTC().Format(time.RFC3339)
@@ -152,5 +158,7 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 		shortHash = shortHash[:7]
 	}
 	fmt.Fprintln(out, FormatSuccess("published", shortHash, len(valid), len(mcpItems), 0))
+	// ADR-0003 5.1: delta block after success line; omitted when nothing changed.
+	PrintDeltaBlock(out, deltaLines)
 	return nil
 }

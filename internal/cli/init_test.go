@@ -19,6 +19,7 @@ var noReader = strings.NewReader("")
 type fakeGitOps struct {
 	cloneErr              error
 	cloned                bool
+	fetchErr              error
 	lsRemoteResult        string
 	lsRemoteErr           error
 	commitErr             error
@@ -38,7 +39,7 @@ type fakeGitOps struct {
 }
 
 func (f *fakeGitOps) Clone(url, dir string) error                         { f.cloned = true; return f.cloneErr }
-func (f *fakeGitOps) Fetch(dir string) error                              { return nil }
+func (f *fakeGitOps) Fetch(dir string) error                              { return f.fetchErr }
 func (f *fakeGitOps) ResetHard(dir, ref string) error                     { return nil }
 func (f *fakeGitOps) IsFastForward(dir, ref string) (bool, error)         { return true, nil }
 func (f *fakeGitOps) HasLocalChanges(dir, sinceHash string) (bool, error) { return false, nil }
@@ -77,6 +78,8 @@ func (f *fakeGitOps) DiffNameStatus(dir, ref string, paths []string) ([]string, 
 func (f *fakeGitOps) ListUntrackedInPaths(dir string, paths []string) ([]string, error) {
 	return f.listUntrackedResult, f.listUntrackedErr
 }
+func (f *fakeGitOps) DiffSyncDelta(workDir string) ([]string, error) { return nil, nil }
+func (f *fakeGitOps) CleanUntracked(workDir string, paths []string) error { return nil }
 
 var _ gitops.Ops = (*fakeGitOps)(nil)
 

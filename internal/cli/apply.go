@@ -48,6 +48,28 @@ func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io
 		return runApplyDryRun(skillsDir, mcpDirFull, cfg, homeDir, out, errOut)
 	}
 
+	// Resolve detected adapters before installation so computeApplyDelta can be
+	// called with the same adapter set used by installSkills.
+	var detectedAdapters []adapter.Adapter
+	var detectedBaseDirs []string
+	for _, a := range adapter.DefaultAdapters(cfg) {
+		baseDir, found := a.Detect(homeDir)
+		if !found {
+			continue
+		}
+		detectedAdapters = append(detectedAdapters, a)
+		detectedBaseDirs = append(detectedBaseDirs, baseDir)
+	}
+
+	// Read valid skills and compute delta BEFORE installation (ADR-0003 5.1).
+	// Warnings for invalid skills are printed by installSkills; suppress them here
+	// to avoid double-printing.
+	valid, _, skillReadErr := skill.ReadAll(skillsDir)
+	if skillReadErr != nil {
+		return fmt.Errorf("cannot read skills: %w", skillReadErr)
+	}
+	deltaLines := computeApplyDelta(valid, detectedAdapters, detectedBaseDirs, false)
+
 	skillCount, envCount, installErr := installSkills(skillsDir, cfg, homeDir, out, errOut)
 	mcpCount, mcpEnvCount, mcpErr := installMCPs(mcpDirFull, &cfg, homeDir, in, out, errOut)
 
@@ -64,6 +86,8 @@ func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io
 		return mcpErr
 	}
 	fmt.Fprintln(out, FormatSuccess("applied", "", skillCount, mcpCount, max(envCount, mcpEnvCount)))
+	// Print delta block only when something changed (ADR-0003 5.1).
+	PrintDeltaBlock(out, deltaLines)
 	return nil
 }
 
@@ -71,6 +95,87 @@ func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io
 type skillDelta struct {
 	category string // "A" = new, "M" = modified
 	envNames []string
+}
+
+// computeApplyDelta returns formatted delta lines for skills that differ from the
+// installed state in the detected adapter environments.
+//
+// Each line is formatted as "A skills/x.md   (new in all environments)" or
+// "M skills/y.md   (updated in claude-code, cursor)" for real runs, and
+// "M skills/y.md   (differs in claude-code, cursor)" for dry-runs.
+//
+// The function is called BEFORE installation so that the snapshot reflects
+// the pre-install state. It is reused by both runApply and runApplyDryRun.
+//
+// ADR-0003 5.1: category D (deletion from env) is out of scope.
+func computeApplyDelta(validSkills []skill.Skill, adapters []adapter.Adapter, baseDirs []string, dryRun bool) []string {
+	if len(adapters) == 0 {
+		return nil
+	}
+	totalEnvs := len(adapters)
+
+	deltaMap := make(map[string]*skillDelta)
+	for _, s := range validSkills {
+		inventoryHash := sha256.Sum256(s.Raw)
+		for i, a := range adapters {
+			installedPath := filepath.Join(baseDirs[i], "skills", s.Name, "SKILL.md")
+			raw, readErr := os.ReadFile(installedPath)
+			if readErr != nil {
+				// File not present in this env.
+				d := deltaMap[s.Name]
+				if d == nil {
+					d = &skillDelta{category: "A"}
+					deltaMap[s.Name] = d
+				}
+				d.envNames = append(d.envNames, a.Name())
+				continue
+			}
+			installedHash := sha256.Sum256(raw)
+			if installedHash != inventoryHash {
+				d := deltaMap[s.Name]
+				if d == nil {
+					d = &skillDelta{category: "M"}
+					deltaMap[s.Name] = d
+				} else if d.category != "A" {
+					// Keep "A" if already set (missing in other envs takes precedence).
+					d.category = "M"
+				}
+				d.envNames = append(d.envNames, a.Name())
+			}
+		}
+	}
+
+	if len(deltaMap) == 0 {
+		return nil
+	}
+
+	var skillNames []string
+	for name := range deltaMap {
+		skillNames = append(skillNames, name)
+	}
+	sort.Strings(skillNames)
+
+	var lines []string
+	for _, name := range skillNames {
+		d := deltaMap[name]
+		var envDesc string
+		if len(d.envNames) == totalEnvs {
+			envDesc = "all environments"
+		} else {
+			envDesc = strings.Join(d.envNames, ", ")
+		}
+		switch d.category {
+		case "A":
+			lines = append(lines, fmt.Sprintf("A skills/%s.md   (new in %s)", name, envDesc))
+		case "M":
+			qualifier := "updated in"
+			if dryRun {
+				qualifier = "differs in"
+			}
+			lines = append(lines, fmt.Sprintf("M skills/%s.md   (%s %s)", name, qualifier, envDesc))
+		}
+	}
+	return lines
 }
 
 func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDir string, out, errOut io.Writer) error {
@@ -106,49 +211,17 @@ func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDi
 		return nil
 	}
 
-	// Build skill delta: map skillName → {category, []envNames}.
-	// category A = file missing in env; category M = content differs.
-	deltaMap := make(map[string]*skillDelta)
-	for _, s := range valid {
-		inventoryHash := sha256.Sum256(s.Raw)
-		for i, a := range detectedAdapters {
-			installedPath := filepath.Join(detectedBaseDirs[i], "skills", s.Name, "SKILL.md")
-			raw, readErr := os.ReadFile(installedPath)
-			if readErr != nil {
-				// File not present in this env.
-				d := deltaMap[s.Name]
-				if d == nil {
-					d = &skillDelta{category: "A"}
-					deltaMap[s.Name] = d
-				}
-				d.envNames = append(d.envNames, a.Name())
-				continue
-			}
-			installedHash := sha256.Sum256(raw)
-			if installedHash != inventoryHash {
-				d := deltaMap[s.Name]
-				if d == nil {
-					d = &skillDelta{category: "M"}
-					deltaMap[s.Name] = d
-				} else if d.category == "A" {
-					// If already categorized as A (missing in other envs), keep A.
-				} else {
-					d.category = "M"
-				}
-				d.envNames = append(d.envNames, a.Name())
-			}
-		}
-	}
+	// Reuse shared delta computation (dry-run qualifier: "differs in").
+	skillLines := computeApplyDelta(valid, detectedAdapters, detectedBaseDirs, true)
 
-	// Build MCP lines.
+	// Build MCP lines (5.5: list target envs, no unverified status claim).
 	type mcpLine struct {
 		name   string
-		status string // "up to date in all environments" or specific env status
+		envs   string // comma-separated targeted env names
 		envTag string // optional [missing env: ...] suffix
 	}
 	var mcpLines []mcpLine
 	for _, m := range mcpItems {
-		// Only include MCPs that target at least one detected adapter.
 		var targetedEnvs []string
 		for _, a := range detectedAdapters {
 			if containsTarget(m.Targets, a.Name()) {
@@ -159,17 +232,11 @@ func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDi
 			continue
 		}
 		envTag := mcpEnvStatus(m, cfg)
-		var status string
-		if len(targetedEnvs) == len(detectedAdapters) {
-			status = "up to date in all environments"
-		} else {
-			status = "up to date in " + strings.Join(targetedEnvs, ", ")
-		}
-		mcpLines = append(mcpLines, mcpLine{name: m.Name, status: status, envTag: envTag})
+		mcpLines = append(mcpLines, mcpLine{name: m.Name, envs: strings.Join(targetedEnvs, ", "), envTag: envTag})
 	}
 
 	// If no changes and no MCPs to report, output "nothing to apply".
-	if len(deltaMap) == 0 && len(mcpLines) == 0 {
+	if len(skillLines) == 0 && len(mcpLines) == 0 {
 		fmt.Fprintln(out, "[dry-run] nothing to apply — environments match local inventory")
 		return nil
 	}
@@ -178,43 +245,23 @@ func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDi
 	totalEnvCount := len(detectedNames)
 	envList := strings.Join(detectedNames, ", ")
 
-	if len(deltaMap) > 0 {
-		// Count total unique change entries.
-		changeCount := len(deltaMap)
-		fmt.Fprintf(out, "[dry-run] would apply %d change(s) to %d environment(s) (%s):\n", changeCount, totalEnvCount, envList)
-
-		// Sort for deterministic output.
-		var skillNames []string
-		for name := range deltaMap {
-			skillNames = append(skillNames, name)
-		}
-		sort.Strings(skillNames)
-
-		var skillLines []string
-		for _, name := range skillNames {
-			d := deltaMap[name]
-			var envDesc string
-			if len(d.envNames) == totalEnvCount {
-				envDesc = "all environments"
-			} else {
-				envDesc = strings.Join(d.envNames, ", ")
-			}
-			if d.category == "A" {
-				skillLines = append(skillLines, fmt.Sprintf("  A skills/%s.md   (new in %s)", name, envDesc))
-			} else {
-				skillLines = append(skillLines, fmt.Sprintf("  M skills/%s.md   (differs in %s)", name, envDesc))
-			}
-		}
-		for _, line := range TruncateDelta(skillLines, deltaTruncateThreshold) {
-			fmt.Fprintln(out, line)
-		}
+	if len(skillLines) > 0 {
+		changeCount := len(skillLines)
+		// ADR-0003 5.6 (4.7): use Plural helper instead of (s) suffix.
+		fmt.Fprintf(out, "[dry-run] would apply %s to %s (%s):\n",
+			Plural(changeCount, "change"),
+			Plural(totalEnvCount, "environment"),
+			envList,
+		)
+		PrintDeltaBlock(out, skillLines)
 	}
 
+	// 5.5: print "[dry-run] MCP <name> → <env1>, <env2>" without status claim.
 	for _, ml := range mcpLines {
 		if ml.envTag != "" {
-			fmt.Fprintf(out, "[dry-run] MCP %s → %s  %s\n", ml.name, ml.status, ml.envTag)
+			fmt.Fprintf(out, "[dry-run] MCP %s → %s  %s\n", ml.name, ml.envs, ml.envTag)
 		} else {
-			fmt.Fprintf(out, "[dry-run] MCP %s → %s\n", ml.name, ml.status)
+			fmt.Fprintf(out, "[dry-run] MCP %s → %s\n", ml.name, ml.envs)
 		}
 	}
 

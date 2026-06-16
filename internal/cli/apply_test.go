@@ -397,6 +397,129 @@ func TestApplyDryRun_MCPMissingEnv(t *testing.T) {
 	}
 }
 
+// --- real-run delta block (ADR-0003 5.1) ---
+
+// TestApply_DeltaNewInAllEnvs: skill in inventory, not installed anywhere →
+// real run prints "A ... (new in all environments)" after success line.
+func TestApply_DeltaNewInAllEnvs(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "refactor-helper.md"),
+		[]byte("---\nname: refactor-helper\ndescription: Refactors code\n---\n\n# Role\nHelps refactor.\n"),
+		0644,
+	); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "applied:") {
+		t.Errorf("expected 'applied:' in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "refactor-helper") {
+		t.Errorf("expected skill name in delta block, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "new in all environments") {
+		t.Errorf("expected 'new in all environments' in delta block, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "  A ") {
+		t.Errorf("expected '  A ' marker in delta block, got: %q", stdout)
+	}
+}
+
+// TestApply_DeltaUpdatedInSubset: skill installed with old content in claude-code →
+// real run prints "M ... (updated in claude-code)" after success line.
+func TestApply_DeltaUpdatedInSubset(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	inventoryContent := "---\nname: commit-message\ndescription: Writes commit messages\n---\n\n# Role\nNew version.\n"
+	installedContent := "---\nname: commit-message\ndescription: Writes commit messages\n---\n\n# Role\nOld version.\n"
+
+	// Install old version in claude env.
+	installedPath := filepath.Join(fakeHome, ".claude", "skills", "commit-message", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(installedPath), 0755); err != nil {
+		t.Fatalf("mkdir installed skill: %v", err)
+	}
+	if err := os.WriteFile(installedPath, []byte(installedContent), 0644); err != nil {
+		t.Fatalf("write installed skill: %v", err)
+	}
+
+	// Write new version to inventory.
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "commit-message.md"),
+		[]byte(inventoryContent),
+		0644,
+	); err != nil {
+		t.Fatalf("write inventory skill: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "applied:") {
+		t.Errorf("expected 'applied:' in output, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "commit-message") {
+		t.Errorf("expected skill name in delta block, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "updated in") {
+		t.Errorf("expected 'updated in' qualifier in real-run delta block, got: %q", stdout)
+	}
+	if strings.Contains(stdout, "differs in") {
+		t.Errorf("real-run must not use 'differs in' (dry-run qualifier), got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "  M ") {
+		t.Errorf("expected '  M ' marker in delta block, got: %q", stdout)
+	}
+}
+
+// TestApply_DeltaEmptyWhenAlreadyInstalled: skill installed with identical content →
+// success line only, no delta block.
+func TestApply_DeltaEmptyWhenAlreadyInstalled(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	skillContent := "---\nname: existing-skill\ndescription: Already installed\n---\n\n# Role\nDoes something.\n"
+
+	// Install same content in claude env.
+	installedPath := filepath.Join(fakeHome, ".claude", "skills", "existing-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(installedPath), 0755); err != nil {
+		t.Fatalf("mkdir installed skill: %v", err)
+	}
+	if err := os.WriteFile(installedPath, []byte(skillContent), 0644); err != nil {
+		t.Fatalf("write installed skill: %v", err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "existing-skill.md"),
+		[]byte(skillContent),
+		0644,
+	); err != nil {
+		t.Fatalf("write inventory skill: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "applied:") {
+		t.Errorf("expected 'applied:' in output, got: %q", stdout)
+	}
+	// No delta block expected when nothing changed.
+	if strings.Contains(stdout, "existing-skill.md") {
+		t.Errorf("no delta block expected when env already matches inventory, got: %q", stdout)
+	}
+}
+
 // TestApplyDryRun_NothingToApply: skill in inventory already installed with identical content → "nothing to apply".
 func TestApplyDryRun_NothingToApply(t *testing.T) {
 	fakeHome := t.TempDir()

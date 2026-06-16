@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -16,6 +17,32 @@ func TruncateDelta(lines []string, maxLines int) []string {
 	copy(out, lines[:maxLines])
 	out[maxLines] = fmt.Sprintf("  … and %d more", len(lines)-maxLines)
 	return out
+}
+
+// ADR-0003 5.2: success line counters = operation volume (how many total applied),
+// delta block = change composition (what is new/modified/deleted).
+// Do not conflate: fixing "21 skills" to show only changed count would break
+// the "sync with no changes" case.
+
+// PrintDeltaBlock writes delta lines to w with 2-space indent and truncation.
+// Lines are already formatted by the caller (e.g. "A skills/x.md").
+// Empty lines slice produces no output.
+// See ADR-0003 5.2: success line = operation volume; delta block = change composition.
+func PrintDeltaBlock(w io.Writer, lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	truncated := TruncateDelta(lines, deltaTruncateThreshold)
+	truncationAdded := len(truncated) == deltaTruncateThreshold+1
+	for i, line := range truncated {
+		// TruncateDelta appends "  … and N more" with its own 2-space prefix when
+		// the input exceeds deltaTruncateThreshold; print it as-is to avoid double-indent.
+		if truncationAdded && i == deltaTruncateThreshold {
+			fmt.Fprintf(w, "%s\n", line)
+		} else {
+			fmt.Fprintf(w, "  %s\n", line)
+		}
+	}
 }
 
 // FormatSuccess builds the canonical success line.
