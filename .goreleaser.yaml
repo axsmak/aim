@@ -41,10 +41,11 @@ changelog:
   use: github
   sort: asc
   filters:
-    exclude:
-      - "^chore:"
-      - "^docs:"
-      - "^test:"
+    include:
+      - "^feat"
+      - "^fix"
+      - "^perf"
+      - "^revert"
 
 brews:
   - name: aiman
