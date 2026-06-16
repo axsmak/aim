@@ -2,6 +2,7 @@ package skill
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -48,6 +49,61 @@ func parseFile(path string) (Skill, *ValidationError, error) {
 		Body:        body,
 		Raw:         raw,
 		FilePath:    path,
+	}, nil, nil
+}
+
+// parseFolderSkill parses a folder-format skill from its SKILL.md file.
+// The skill name is taken from the directory name, not from frontmatter.
+// Returns a ValidationError (not a system error) when required fields are missing.
+func parseFolderSkill(skillMDPath string, name string) (Skill, *ValidationError, error) {
+	raw, err := readFile(skillMDPath)
+	if err != nil {
+		return Skill{}, nil, err
+	}
+
+	fm, body, ok := splitFrontmatter(raw)
+	if !ok {
+		return Skill{}, &ValidationError{
+			FilePath: skillMDPath,
+			Field:    "frontmatter",
+			Message:  "file does not start with ---",
+		}, nil
+	}
+
+	var meta frontmatter
+	if err := yaml.Unmarshal([]byte(fm), &meta); err != nil {
+		return Skill{}, nil, err
+	}
+
+	// Name comes from directory; description and body are still required.
+	if meta.Description == "" {
+		return Skill{}, &ValidationError{FilePath: skillMDPath, Field: "description", Message: "required"}, nil
+	}
+	if strings.TrimSpace(body) == "" {
+		return Skill{}, &ValidationError{FilePath: skillMDPath, Field: "body", Message: "must not be empty"}, nil
+	}
+
+	// Collect reference files: everything in the folder except SKILL.md, non-recursive.
+	dir := filepath.Dir(skillMDPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return Skill{}, nil, err
+	}
+	var refFiles []string
+	for _, e := range entries {
+		if !e.IsDir() && e.Name() != "SKILL.md" {
+			refFiles = append(refFiles, e.Name())
+		}
+	}
+
+	return Skill{
+		Name:        name,
+		Description: meta.Description,
+		Body:        body,
+		Raw:         raw,
+		FilePath:    skillMDPath,
+		SourceDir:   dir,
+		RefFiles:    refFiles,
 	}, nil, nil
 }
 
