@@ -171,3 +171,160 @@ func TestValidationError_Error(t *testing.T) {
 		t.Errorf("Error() = %q", got)
 	}
 }
+
+const validFolderSkillContent = "---\nname: write-agent\ndescription: Write agent definitions\n---\n\n# Role\nHelps write agents.\n"
+
+func writeFolderSkill(t *testing.T, skillsDir, skillName, content string) string {
+	t.Helper()
+	dir := filepath.Join(skillsDir, skillName)
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	writeFile(t, dir, "SKILL.md", content)
+	return dir
+}
+
+func TestReadAll_FolderSkill_Discovered(t *testing.T) {
+	dir := t.TempDir()
+	writeFolderSkill(t, dir, "write-agent", validFolderSkillContent)
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("expected no invalid skills, got: %v", invalid)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	s := valid[0]
+	if s.Name != "write-agent" {
+		t.Errorf("Name = %q, want %q", s.Name, "write-agent")
+	}
+	if s.SourceDir == "" {
+		t.Error("SourceDir must not be empty for folder skill")
+	}
+}
+
+func TestReadAll_FolderSkill_FlatTakesPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	// Flat file with its own name in frontmatter
+	writeFile(t, dir, "write-agent.md", "---\nname: write-agent\ndescription: Flat version\n---\n\nFlat body.\n")
+	// Folder skill with same directory name
+	writeFolderSkill(t, dir, "write-agent", validFolderSkillContent)
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("expected no invalid skills, got: %v", invalid)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected exactly 1 valid skill, got %d", len(valid))
+	}
+	s := valid[0]
+	if s.Name != "write-agent" {
+		t.Errorf("Name = %q, want %q", s.Name, "write-agent")
+	}
+	if s.SourceDir != "" {
+		t.Errorf("SourceDir = %q, want empty (flat file should win)", s.SourceDir)
+	}
+}
+
+func TestReadAll_FolderSkill_SkipsFolderWithoutSKILLMD(t *testing.T) {
+	dir := t.TempDir()
+	// Create a subdirectory with a non-SKILL.md file but no SKILL.md
+	orphanDir := filepath.Join(dir, "orphan-folder")
+	if err := os.Mkdir(orphanDir, 0755); err != nil {
+		t.Fatalf("mkdir orphan-folder: %v", err)
+	}
+	writeFile(t, orphanDir, "other.md", "---\nname: other\ndescription: Other\n---\n\nBody.\n")
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Errorf("expected no invalid skills, got: %v", invalid)
+	}
+	if len(valid) != 0 {
+		t.Errorf("expected 0 valid skills (orphan folder ignored), got %d", len(valid))
+	}
+}
+
+func TestReadAll_FolderSkill_RefFilesCollected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-agent", validFolderSkillContent)
+	writeFile(t, skillDir, "agent-patterns.md", "# Patterns\nSome patterns.")
+	writeFile(t, skillDir, "delegation.md", "# Delegation\nDelegation notes.")
+
+	valid, _, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	s := valid[0]
+	if len(s.RefFiles) != 2 {
+		t.Errorf("len(RefFiles) = %d, want 2; RefFiles = %v", len(s.RefFiles), s.RefFiles)
+	}
+}
+
+func TestReadAll_FolderSkill_SourceDirIsAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	writeFolderSkill(t, dir, "write-agent", validFolderSkillContent)
+
+	valid, _, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	s := valid[0]
+	if !filepath.IsAbs(s.SourceDir) {
+		t.Errorf("SourceDir = %q is not absolute", s.SourceDir)
+	}
+}
+
+func TestReadAll_FolderSkill_InvalidMissingDescription(t *testing.T) {
+	dir := t.TempDir()
+	// SKILL.md with name but no description
+	writeFolderSkill(t, dir, "write-agent", "---\nname: write-agent\n---\n\n# Role\nBody.\n")
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(valid) != 0 {
+		t.Errorf("expected 0 valid skills, got %d", len(valid))
+	}
+	if len(invalid) != 1 {
+		t.Fatalf("expected 1 invalid skill, got %d", len(invalid))
+	}
+	if invalid[0].Field != "description" {
+		t.Errorf("Field = %q, want %q", invalid[0].Field, "description")
+	}
+}
+
+func TestReadAll_FolderSkill_BothFlatAndFolder(t *testing.T) {
+	dir := t.TempDir()
+	// Valid flat skill "a"
+	writeFile(t, dir, "a.md", "---\nname: a\ndescription: Skill A\n---\n\nBody A.\n")
+	// Valid folder skill "b"
+	writeFolderSkill(t, dir, "b", "---\nname: b\ndescription: Skill B\n---\n\nBody B.\n")
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Errorf("expected no invalid skills, got: %v", invalid)
+	}
+	if len(valid) != 2 {
+		t.Errorf("expected 2 valid skills, got %d", len(valid))
+	}
+}

@@ -185,6 +185,92 @@ func TestCodexAdapter_InstallSkill_CreatesNestedDirectories(t *testing.T) {
 	}
 }
 
+func TestCursorAdapter_InstallSkill_FolderSkill_CopiesRefs(t *testing.T) {
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "agent-patterns.md"), []byte("# Patterns\nContent."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "delegation.md"), []byte("# Delegation\nNotes."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := skill.Skill{
+		Name:      "write-agent",
+		Raw:       []byte("---\nname: write-agent\ndescription: Write agent definitions\n---\n\n# Role\nHelps write agents.\n"),
+		SourceDir: sourceDir,
+		RefFiles:  []string{"agent-patterns.md", "delegation.md"},
+	}
+
+	home := t.TempDir()
+	baseDir := filepath.Join(home, ".cursor")
+
+	a := adapter.NewCursorAdapter("")
+	if err := a.InstallSkill(s, baseDir); err != nil {
+		t.Fatalf("InstallSkill() error = %v", err)
+	}
+
+	destDir := filepath.Join(baseDir, "skills", "write-agent")
+
+	if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md not found: %v", err)
+	}
+	for _, ref := range []string{"agent-patterns.md", "delegation.md"} {
+		dest := filepath.Join(destDir, ref)
+		got, err := os.ReadFile(dest)
+		if err != nil {
+			t.Errorf("ref file %s not found: %v", ref, err)
+			continue
+		}
+		src, _ := os.ReadFile(filepath.Join(sourceDir, ref))
+		if string(got) != string(src) {
+			t.Errorf("ref file %s content mismatch: got %q, want %q", ref, got, src)
+		}
+	}
+}
+
+func TestCodexAdapter_InstallSkill_FolderSkill_CopiesRefs(t *testing.T) {
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "agent-patterns.md"), []byte("# Patterns\nContent."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "delegation.md"), []byte("# Delegation\nNotes."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := skill.Skill{
+		Name:      "write-agent",
+		Raw:       []byte("---\nname: write-agent\ndescription: Write agent definitions\n---\n\n# Role\nHelps write agents.\n"),
+		SourceDir: sourceDir,
+		RefFiles:  []string{"agent-patterns.md", "delegation.md"},
+	}
+
+	home := t.TempDir()
+	baseDir := filepath.Join(home, ".codex")
+
+	a := adapter.NewCodexAdapter("")
+	if err := a.InstallSkill(s, baseDir); err != nil {
+		t.Fatalf("InstallSkill() error = %v", err)
+	}
+
+	destDir := filepath.Join(baseDir, "skills", "write-agent")
+
+	if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md not found: %v", err)
+	}
+	for _, ref := range []string{"agent-patterns.md", "delegation.md"} {
+		dest := filepath.Join(destDir, ref)
+		got, err := os.ReadFile(dest)
+		if err != nil {
+			t.Errorf("ref file %s not found: %v", ref, err)
+			continue
+		}
+		src, _ := os.ReadFile(filepath.Join(sourceDir, ref))
+		if string(got) != string(src) {
+			t.Errorf("ref file %s content mismatch: got %q, want %q", ref, got, src)
+		}
+	}
+}
+
 // --- NewClaudeCodeAdapter constructor ---
 
 func TestNewClaudeCodeAdapter_ConfigBaseDirOverrides(t *testing.T) {

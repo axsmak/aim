@@ -160,6 +160,88 @@ func TestClaudeCodeAdapter_InstallSkill_CreatesNestedDirectories(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeAdapter_InstallSkill_FolderSkill_CopiesRefs(t *testing.T) {
+	// Set up a source dir with reference files
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "agent-patterns.md"), []byte("# Patterns\nContent."), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "delegation.md"), []byte("# Delegation\nNotes."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := skill.Skill{
+		Name:      "write-agent",
+		Raw:       []byte("---\nname: write-agent\ndescription: Write agent definitions\n---\n\n# Role\nHelps write agents.\n"),
+		SourceDir: sourceDir,
+		RefFiles:  []string{"agent-patterns.md", "delegation.md"},
+	}
+
+	home := t.TempDir()
+	baseDir := filepath.Join(home, ".claude")
+
+	a := adapter.ClaudeCodeAdapter{}
+	if err := a.InstallSkill(s, baseDir); err != nil {
+		t.Fatalf("InstallSkill() error = %v", err)
+	}
+
+	destDir := filepath.Join(baseDir, "skills", "write-agent")
+
+	// SKILL.md must exist
+	if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md not found: %v", err)
+	}
+	// Reference files must be copied
+	for _, ref := range []string{"agent-patterns.md", "delegation.md"} {
+		dest := filepath.Join(destDir, ref)
+		got, err := os.ReadFile(dest)
+		if err != nil {
+			t.Errorf("ref file %s not found: %v", ref, err)
+			continue
+		}
+		src, _ := os.ReadFile(filepath.Join(sourceDir, ref))
+		if string(got) != string(src) {
+			t.Errorf("ref file %s content mismatch: got %q, want %q", ref, got, src)
+		}
+	}
+}
+
+func TestClaudeCodeAdapter_InstallSkill_FlatSkill_NoRefFilesDir(t *testing.T) {
+	s := skill.Skill{
+		Name: "flat-skill",
+		Raw:  []byte("---\nname: flat-skill\ndescription: A flat skill\n---\n\n# Role\nDoes something.\n"),
+		// SourceDir and RefFiles are zero values (flat skill)
+	}
+
+	home := t.TempDir()
+	baseDir := filepath.Join(home, ".claude")
+
+	a := adapter.ClaudeCodeAdapter{}
+	if err := a.InstallSkill(s, baseDir); err != nil {
+		t.Fatalf("InstallSkill() error = %v", err)
+	}
+
+	destDir := filepath.Join(baseDir, "skills", "flat-skill")
+
+	// SKILL.md must exist
+	if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md not found: %v", err)
+	}
+
+	// No extra files should exist — only SKILL.md
+	entries, err := os.ReadDir(destDir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected only SKILL.md, got: %v", names)
+	}
+}
+
 func readJSONFile(t *testing.T, path string) map[string]interface{} {
 	t.Helper()
 	data, err := os.ReadFile(path)

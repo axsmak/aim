@@ -252,3 +252,35 @@ func TestDoctor_MissingSkillsDir(t *testing.T) {
 		t.Errorf("expected 0 valid 0 invalid, got:\n%s", stdout)
 	}
 }
+
+func TestDoctor_FolderSkill_CountedInValid(t *testing.T) {
+	fakeHome := t.TempDir()
+	for _, dir := range []string{".claude", ".cursor", ".codex"} {
+		if err := os.Mkdir(filepath.Join(fakeHome, dir), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	workDir := t.TempDir()
+	skillsDir := filepath.Join(workDir, "skills")
+	if err := os.Mkdir(skillsDir, 0755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	// Create folder skill: skills/write-agent/SKILL.md
+	folderSkillDir := filepath.Join(skillsDir, "write-agent")
+	if err := os.Mkdir(folderSkillDir, 0755); err != nil {
+		t.Fatalf("mkdir write-agent: %v", err)
+	}
+	const validFolderSkillContent = "---\nname: write-agent\ndescription: Write agent definitions\n---\n\n# Role\nHelps write agents.\n"
+	if err := os.WriteFile(filepath.Join(folderSkillDir, "SKILL.md"), []byte(validFolderSkillContent), 0644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+
+	stdout, err := runDoctorCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "Found: 1 valid, 0 invalid") {
+		t.Errorf("expected 'Found: 1 valid, 0 invalid' in output, got:\n%s", stdout)
+	}
+}
