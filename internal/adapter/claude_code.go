@@ -128,11 +128,7 @@ func (a ClaudeCodeAdapter) Detect(homeDir string) (string, bool) {
 }
 
 func (a ClaudeCodeAdapter) InstallSkill(s skill.Skill, baseDir string) error {
-	destDir := filepath.Join(baseDir, "skills", s.Name)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(destDir, "SKILL.md"), s.Raw, 0644)
+	return installSkillDir(s, baseDir)
 }
 
 func (a ClaudeCodeAdapter) InstallMCP(m mcp.MCP, baseDir string, envValues map[string]string) error {

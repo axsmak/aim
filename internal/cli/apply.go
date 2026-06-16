@@ -116,6 +116,9 @@ func computeApplyDelta(validSkills []skill.Skill, adapters []adapter.Adapter, ba
 
 	deltaMap := make(map[string]*skillDelta)
 	for _, s := range validSkills {
+		// Note: for folder-format skills, only SKILL.md is hashed; reference files
+		// are not tracked by this delta. A changed reference file will not be detected
+		// here. See issue #138 for a planned follow-up.
 		inventoryHash := sha256.Sum256(s.Raw)
 		for i, a := range adapters {
 			installedPath := filepath.Join(baseDirs[i], "skills", s.Name, "SKILL.md")
