@@ -98,19 +98,19 @@ func TestPushSync_E2E_SkillsAndMCP(t *testing.T) {
 		t.Errorf("skill not installed on Machine B at %s: %v", skillPath, err)
 	}
 
-	// MCP installed: homeB/.claude/settings.json contains "test-server" in mcpServers
-	settingsPath := filepath.Join(fakeHomeB, ".claude", "settings.json")
-	settingsData, err := os.ReadFile(settingsPath)
+	// MCP installed: homeB/.claude.json contains "test-server" in mcpServers
+	claudeJSONPath := filepath.Join(fakeHomeB, ".claude.json")
+	claudeJSONData, err := os.ReadFile(claudeJSONPath)
 	if err != nil {
-		t.Fatalf("settings.json not created on Machine B: %v", err)
+		t.Fatalf(".claude.json not created on Machine B: %v", err)
 	}
 	var settings map[string]interface{}
-	if err := json.Unmarshal(settingsData, &settings); err != nil {
-		t.Fatalf("invalid JSON in settings.json on Machine B: %v", err)
+	if err := json.Unmarshal(claudeJSONData, &settings); err != nil {
+		t.Fatalf("invalid JSON in .claude.json on Machine B: %v", err)
 	}
 	mcpServers, ok := settings["mcpServers"].(map[string]interface{})
 	if !ok {
-		t.Fatal("mcpServers missing from settings.json on Machine B")
+		t.Fatal("mcpServers missing from .claude.json on Machine B")
 	}
 	if _, found := mcpServers["test-server"]; !found {
 		t.Errorf("test-server not found in mcpServers on Machine B; got keys: %v", mcpServersKeys(mcpServers))
