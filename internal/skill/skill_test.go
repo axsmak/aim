@@ -310,6 +310,100 @@ func TestReadAll_FolderSkill_InvalidMissingDescription(t *testing.T) {
 	}
 }
 
+func TestReadFolderSkill_NameFromParentDir(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-agent", validFolderSkillContent)
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve != nil {
+		t.Fatalf("unexpected validation error: %v", ve)
+	}
+	if s.Name != "write-agent" {
+		t.Errorf("Name = %q, want %q", s.Name, "write-agent")
+	}
+	if s.SourceDir != skillDir {
+		t.Errorf("SourceDir = %q, want %q", s.SourceDir, skillDir)
+	}
+}
+
+func TestReadFolderSkill_RefFilesCollected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-agent", validFolderSkillContent)
+	writeFile(t, skillDir, "patterns.md", "# Patterns")
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve != nil {
+		t.Fatalf("unexpected validation error: %v", ve)
+	}
+	if len(s.RefFiles) != 1 || s.RefFiles[0] != "patterns.md" {
+		t.Errorf("RefFiles = %v, want [patterns.md]", s.RefFiles)
+	}
+}
+
+func TestReadFolderSkill_MissingDescription_ValidationError(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-agent", "---\nname: write-agent\n---\n\n# Role\nBody.\n")
+
+	_, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve == nil || ve.Field != "description" {
+		t.Fatalf("expected ValidationError on field 'description', got: %v", ve)
+	}
+}
+
+func TestWriteTo_FlatSkill_WritesSkillMDOnly(t *testing.T) {
+	s := skill.Skill{Name: "my-skill", Raw: []byte("---\nname: my-skill\ndescription: D\n---\n\nBody.\n")}
+	baseDir := t.TempDir()
+
+	if err := skill.WriteTo(s, baseDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(baseDir, "skills", "my-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("SKILL.md not written: %v", err)
+	}
+	if string(got) != string(s.Raw) {
+		t.Error("SKILL.md content mismatch")
+	}
+}
+
+func TestWriteTo_FolderSkill_CopiesRefFiles(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-agent", validFolderSkillContent)
+	writeFile(t, skillDir, "patterns.md", "# Patterns\nContent.")
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil || ve != nil {
+		t.Fatalf("setup: ReadFolderSkill failed: err=%v ve=%v", err, ve)
+	}
+
+	baseDir := t.TempDir()
+	if err := skill.WriteTo(s, baseDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	destDir := filepath.Join(baseDir, "skills", "write-agent")
+	if _, err := os.Stat(filepath.Join(destDir, "SKILL.md")); err != nil {
+		t.Errorf("SKILL.md not written: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(destDir, "patterns.md"))
+	if err != nil {
+		t.Fatalf("reference file not copied: %v", err)
+	}
+	if string(got) != "# Patterns\nContent." {
+		t.Error("reference file content mismatch")
+	}
+}
+
 func TestReadAll_FolderSkill_BothFlatAndFolder(t *testing.T) {
 	dir := t.TempDir()
 	// Valid flat skill "a"

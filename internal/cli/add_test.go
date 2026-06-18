@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/axsmak/aim/internal/cli"
@@ -148,6 +149,80 @@ func TestAddSkill_OverwriteFlag(t *testing.T) {
 	}
 	if string(got) != updated {
 		t.Error("skill must be overwritten when --overwrite is set")
+	}
+}
+
+const validFolderSkillContent = "---\nname: write-agent\ndescription: Write agent definitions\n---\n\n# Role\nHelps write agents.\n"
+
+func writeFolderSkillSrc(t *testing.T, parentDir, skillName, content string) string {
+	t.Helper()
+	dir := filepath.Join(parentDir, skillName)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+	return dir
+}
+
+func TestAddSkill_DirPath_CopiesFolderSkillWithRefs(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	srcDir := writeFolderSkillSrc(t, t.TempDir(), "write-agent", validFolderSkillContent)
+	if err := os.WriteFile(filepath.Join(srcDir, "patterns.md"), []byte("# Patterns"), 0644); err != nil {
+		t.Fatalf("write ref file: %v", err)
+	}
+
+	_, _, err := runAddCmd(t, fakeHome, workDir, "skill", srcDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	destDir := filepath.Join(workDir, "skills", "write-agent")
+	if _, statErr := os.Stat(filepath.Join(destDir, "SKILL.md")); statErr != nil {
+		t.Errorf("SKILL.md not written: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(destDir, "patterns.md")); statErr != nil {
+		t.Errorf("reference file not copied: %v", statErr)
+	}
+}
+
+func TestAddSkill_SkillMDPath_SameResultAsDirPath(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	srcDir := writeFolderSkillSrc(t, t.TempDir(), "write-agent", validFolderSkillContent)
+	if err := os.WriteFile(filepath.Join(srcDir, "patterns.md"), []byte("# Patterns"), 0644); err != nil {
+		t.Fatalf("write ref file: %v", err)
+	}
+
+	_, _, err := runAddCmd(t, fakeHome, workDir, "skill", filepath.Join(srcDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	destDir := filepath.Join(workDir, "skills", "write-agent")
+	if _, statErr := os.Stat(filepath.Join(destDir, "SKILL.md")); statErr != nil {
+		t.Errorf("SKILL.md not written: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(destDir, "patterns.md")); statErr != nil {
+		t.Errorf("reference file not copied when passing SKILL.md path: %v", statErr)
+	}
+}
+
+func TestAddSkill_DirWithoutSkillMD_ClearError(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+	emptyDir := t.TempDir()
+
+	_, _, err := runAddCmd(t, fakeHome, workDir, "skill", emptyDir)
+	if err == nil {
+		t.Fatal("expected error for directory without SKILL.md, got nil")
+	}
+	if strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("expected a clear error, got system-style message: %v", err)
 	}
 }
 
