@@ -71,7 +71,7 @@ func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io
 	deltaLines := computeApplyDelta(valid, detectedAdapters, detectedBaseDirs, false)
 
 	skillCount, envCount, installErr := installSkills(skillsDir, cfg, homeDir, out, errOut)
-	mcpCount, mcpEnvCount, mcpErr := installMCPs(mcpDirFull, &cfg, homeDir, in, out, errOut)
+	mcpCount, mcpEnvNames, mcpErr := installMCPs(mcpDirFull, &cfg, homeDir, in, out, errOut)
 
 	// Save cfg if MCP env values were resolved.
 	// IMPORTANT: synced_hash and published_hash are never touched here.
@@ -85,7 +85,7 @@ func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io
 	if mcpErr != nil {
 		return mcpErr
 	}
-	fmt.Fprintln(out, FormatSuccess("applied", "", skillCount, mcpCount, max(envCount, mcpEnvCount)))
+	fmt.Fprintln(out, FormatSuccess("applied", "", skillCount, mcpCount, envCount, mcpEnvNames))
 	// Print delta block only when something changed (ADR-0003 5.1).
 	PrintDeltaBlock(out, deltaLines)
 	return nil

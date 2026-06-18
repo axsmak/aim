@@ -554,3 +554,82 @@ func TestApplyDryRun_NothingToApply(t *testing.T) {
 		t.Errorf("expected 'nothing to apply' when env matches inventory, got: %q", stdout)
 	}
 }
+
+// TestApply_MCPTargetSubset_RealRun reproduces the reported scenario for issues
+// #120 and #139: three environments detected, an MCP server targeting only one
+// of them (claude-code).
+//
+//   - #120: the success line must not claim the MCP server reached all 3
+//     environments — it must name the one environment it actually reached.
+//   - #139: claude-code install must land in ~/.claude.json (which Claude Code
+//     reads for MCP server definitions), not ~/.claude/settings.json.
+func TestApply_MCPTargetSubset_RealRun(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	for _, dir := range []string{".claude", ".cursor", ".codex"} {
+		if err := os.MkdirAll(filepath.Join(fakeHome, dir), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "test-skill.md"),
+		[]byte(validSkillContent),
+		0644,
+	); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	if err := localconfig.Save(workDir, localconfig.Config{}); err != nil {
+		t.Fatalf("save localconfig: %v", err)
+	}
+
+	mcpDir := filepath.Join(workDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0755); err != nil {
+		t.Fatalf("mkdir mcp: %v", err)
+	}
+	mcpContent := "name: mcp-atlassian\ndescription: Atlassian MCP\ncommand: npx\nargs:\n  - -y\n  - mcp-atlassian\ntargets:\n  - claude-code\nenv: []\n"
+	if err := os.WriteFile(filepath.Join(mcpDir, "mcp-atlassian.yaml"), []byte(mcpContent), 0644); err != nil {
+		t.Fatalf("write mcp: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// #120: success line must name claude-code for the MCP segment, not claim
+	// all 3 environments.
+	if !strings.Contains(stdout, "1 MCP server → claude-code") {
+		t.Errorf("expected MCP segment scoped to claude-code, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "3 environments") {
+		t.Errorf("expected skill segment to report 3 environments, got: %q", stdout)
+	}
+
+	// #139: the server definition must be readable from ~/.claude.json — the
+	// file Claude Code actually reads — not settings.json.
+	claudeJSONPath := filepath.Join(fakeHome, ".claude.json")
+	data, err := os.ReadFile(claudeJSONPath)
+	if err != nil {
+		t.Fatalf(".claude.json not created: %v", err)
+	}
+	if !strings.Contains(string(data), "mcp-atlassian") {
+		t.Errorf("expected mcp-atlassian in .claude.json, got: %s", string(data))
+	}
+
+	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		t.Errorf("settings.json should not be written by InstallMCP, stat err = %v", err)
+	}
+
+	// Cursor and codex must not receive the MCP server (targets: claude-code only).
+	if _, err := os.Stat(filepath.Join(fakeHome, ".cursor", "mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("mcp.json should not be written to cursor (not in targets), stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(fakeHome, ".codex", "config.toml")); !os.IsNotExist(err) {
+		t.Errorf("config.toml should not be written to codex (not in targets), stat err = %v", err)
+	}
+}

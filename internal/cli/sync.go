@@ -172,7 +172,7 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, git gitops.
 
 	skillCount, envCount, installErr := installSkills(skillsDir, cfg, homeDir, out, errOut)
 
-	mcpCount, mcpEnvCount, mcpErr := installMCPs(mcpDirFull, &cfg, homeDir, in, out, errOut)
+	mcpCount, mcpEnvNames, mcpErr := installMCPs(mcpDirFull, &cfg, homeDir, in, out, errOut)
 
 	hash, err := git.HeadHash(workDir)
 	if err != nil {
@@ -208,7 +208,7 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, git gitops.
 		PrintDeltaBlock(out, forceDiscarded)
 	}
 
-	fmt.Fprintln(out, FormatSuccess("synced", shortHash, skillCount, mcpCount, max(envCount, mcpEnvCount)))
+	fmt.Fprintln(out, FormatSuccess("synced", shortHash, skillCount, mcpCount, envCount, mcpEnvNames))
 
 	// ADR-0003 5.1: print delta block after success line (empty = no block).
 	PrintDeltaBlock(out, syncDeltaLines)
@@ -260,6 +260,7 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 
 	cfgChanged := false
 	installedEnvCount := 0
+	var mcpEnvNames []string
 
 	for _, a := range adapter.DefaultAdapters(cfg) {
 		baseDir, found := a.Detect(homeDir)
@@ -274,6 +275,7 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 			}
 		}
 
+		mcpInstalledHere := 0
 		for _, item := range mcpItems {
 			if !containsTarget(item.Targets, a.Name()) {
 				continue
@@ -293,13 +295,17 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 				fmt.Fprintf(errOut, "warning: failed to install MCP %s in %s: %v\n", item.Name, a.Name(), err)
 				continue
 			}
+			mcpInstalledHere++
+		}
+		if mcpInstalledHere > 0 {
+			mcpEnvNames = append(mcpEnvNames, a.Name())
 		}
 		installedEnvCount++
 	}
 
 	if installedEnvCount > 0 {
 		// ADR-0003 5.6 / 4.2: local-mode uses "synced:" not "applied:".
-		fmt.Fprintln(out, FormatSuccess("synced", "", len(valid), len(mcpItems), installedEnvCount))
+		fmt.Fprintln(out, FormatSuccess("synced", "", len(valid), len(mcpItems), installedEnvCount, mcpEnvNames))
 	}
 
 	if cfgChanged {
@@ -338,15 +344,15 @@ func installSkills(skillsDir string, cfg localconfig.Config, homeDir string, out
 }
 
 // installMCPs reads mcp/ directory and applies each MCP item to all matching adapters.
-// Returns MCP item count, env count, and a non-nil error if any install failed.
-// synced_hash must not be updated when this returns an error.
-func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.Reader, out, errOut io.Writer) (mcpCount, envCount int, err error) {
+// Returns MCP item count, the names of environments actually installed into, and a
+// non-nil error if any install failed. synced_hash must not be updated on error.
+func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.Reader, out, errOut io.Writer) (mcpCount int, envNames []string, err error) {
 	items, parseErrs := mcp.ParseDir(mcpDir)
 	for _, e := range parseErrs {
 		fmt.Fprintf(errOut, "warning: %v\n", e)
 	}
 	if len(items) == 0 {
-		return 0, 0, nil
+		return 0, nil, nil
 	}
 
 	var hadInstallError bool
@@ -378,14 +384,14 @@ func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.R
 			installed++
 		}
 		if installed > 0 {
-			envCount++
+			envNames = append(envNames, a.Name())
 			mcpCount = len(items)
 		}
 	}
 	if hadInstallError {
-		return mcpCount, envCount, fmt.Errorf("one or more MCP servers failed to install; synced_hash not updated")
+		return mcpCount, envNames, fmt.Errorf("one or more MCP servers failed to install; synced_hash not updated")
 	}
-	return mcpCount, envCount, nil
+	return mcpCount, envNames, nil
 }
 
 func mcpEnvStatus(m mcp.MCP, cfg localconfig.Config) string {
@@ -439,11 +445,4 @@ func countEnvs(homeDir string, cfg localconfig.Config) int {
 		}
 	}
 	return count
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

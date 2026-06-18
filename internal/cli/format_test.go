@@ -14,7 +14,8 @@ func TestFormatSuccess(t *testing.T) {
 		hash      string
 		skills    int
 		mcpServer int
-		envs      int
+		skillEnvs int
+		mcpEnvs   []string
 		want      string
 	}{
 		{
@@ -23,7 +24,8 @@ func TestFormatSuccess(t *testing.T) {
 			hash:      "96e091b",
 			skills:    19,
 			mcpServer: 0,
-			envs:      0,
+			skillEnvs: 0,
+			mcpEnvs:   nil,
 			want:      "published: 96e091b · 19 skills",
 		},
 		{
@@ -32,7 +34,8 @@ func TestFormatSuccess(t *testing.T) {
 			hash:      "96e091b",
 			skills:    19,
 			mcpServer: 1,
-			envs:      0,
+			skillEnvs: 0,
+			mcpEnvs:   nil,
 			want:      "published: 96e091b · 19 skills, 1 MCP server",
 		},
 		{
@@ -41,16 +44,18 @@ func TestFormatSuccess(t *testing.T) {
 			hash:      "96e091b",
 			skills:    19,
 			mcpServer: 3,
-			envs:      0,
+			skillEnvs: 0,
+			mcpEnvs:   nil,
 			want:      "published: 96e091b · 19 skills, 3 MCP servers",
 		},
 		{
-			name:      "sync: hash + skills + MCP + envs",
+			name:      "sync: hash + skills + MCP + envs, uniform (MCP in all skill envs)",
 			verb:      "synced",
 			hash:      "96e091b",
 			skills:    19,
 			mcpServer: 1,
-			envs:      3,
+			skillEnvs: 3,
+			mcpEnvs:   []string{"claude-code", "cursor", "codex"},
 			want:      "synced: 96e091b · 19 skills, 1 MCP server → 3 environments",
 		},
 		{
@@ -59,16 +64,18 @@ func TestFormatSuccess(t *testing.T) {
 			hash:      "96e091b",
 			skills:    5,
 			mcpServer: 0,
-			envs:      2,
+			skillEnvs: 2,
+			mcpEnvs:   nil,
 			want:      "synced: 96e091b · 5 skills → 2 environments",
 		},
 		{
-			name:      "apply: no hash, skills + MCP + envs",
+			name:      "apply: no hash, skills + MCP + envs, uniform (MCP in all skill envs)",
 			verb:      "applied",
 			hash:      "",
 			skills:    19,
 			mcpServer: 1,
-			envs:      3,
+			skillEnvs: 3,
+			mcpEnvs:   []string{"claude-code", "cursor", "codex"},
 			want:      "applied: 19 skills, 1 MCP server → 3 environments",
 		},
 		{
@@ -77,26 +84,71 @@ func TestFormatSuccess(t *testing.T) {
 			hash:      "",
 			skills:    5,
 			mcpServer: 0,
-			envs:      2,
+			skillEnvs: 2,
+			mcpEnvs:   nil,
 			want:      "applied: 5 skills → 2 environments",
 		},
 		{
-			name:      "singular skill",
+			name:      "singular skill, uniform",
 			verb:      "applied",
 			hash:      "",
 			skills:    1,
 			mcpServer: 1,
-			envs:      1,
+			skillEnvs: 1,
+			mcpEnvs:   []string{"codex"},
 			want:      "applied: 1 skill, 1 MCP server → 1 environment",
+		},
+		{
+			// Issue #120: MCP `targets` narrows it to one of three skill environments.
+			name:      "apply: divergent, single MCP env (issue #120)",
+			verb:      "applied",
+			hash:      "",
+			skills:    22,
+			mcpServer: 1,
+			skillEnvs: 3,
+			mcpEnvs:   []string{"codex"},
+			want:      "applied: 22 skills → 3 environments, 1 MCP server → codex",
+		},
+		{
+			name:      "apply: divergent, multiple MCP envs",
+			verb:      "applied",
+			hash:      "",
+			skills:    10,
+			mcpServer: 2,
+			skillEnvs: 3,
+			mcpEnvs:   []string{"cursor", "codex"},
+			want:      "applied: 10 skills → 3 environments, 2 MCP servers → cursor, codex",
+		},
+		{
+			name:      "sync: divergent, single MCP env",
+			verb:      "synced",
+			hash:      "96e091b",
+			skills:    22,
+			mcpServer: 1,
+			skillEnvs: 3,
+			mcpEnvs:   []string{"claude-code"},
+			want:      "synced: 96e091b · 22 skills → 3 environments, 1 MCP server → claude-code",
+		},
+		{
+			// mcpServer>0 but mcpEnvs empty: targets matched no detected environment.
+			// Falls back to the shared-arrow rendering instead of a dangling "→ ".
+			name:      "apply: MCP targets matched no detected environment",
+			verb:      "applied",
+			hash:      "",
+			skills:    5,
+			mcpServer: 1,
+			skillEnvs: 2,
+			mcpEnvs:   nil,
+			want:      "applied: 5 skills, 1 MCP server → 2 environments",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FormatSuccess(tc.verb, tc.hash, tc.skills, tc.mcpServer, tc.envs)
+			got := FormatSuccess(tc.verb, tc.hash, tc.skills, tc.mcpServer, tc.skillEnvs, tc.mcpEnvs)
 			if got != tc.want {
-				t.Errorf("FormatSuccess(%q, %q, %d, %d, %d)\n  got:  %q\n  want: %q",
-					tc.verb, tc.hash, tc.skills, tc.mcpServer, tc.envs, got, tc.want)
+				t.Errorf("FormatSuccess(%q, %q, %d, %d, %d, %v)\n  got:  %q\n  want: %q",
+					tc.verb, tc.hash, tc.skills, tc.mcpServer, tc.skillEnvs, tc.mcpEnvs, got, tc.want)
 			}
 		})
 	}

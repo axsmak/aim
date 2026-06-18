@@ -157,7 +157,7 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 	if len(shortHash) > 7 {
 		shortHash = shortHash[:7]
 	}
-	fmt.Fprintln(out, FormatSuccess("published", shortHash, len(valid), len(mcpItems), 0))
+	fmt.Fprintln(out, FormatSuccess("published", shortHash, len(valid), len(mcpItems), 0, nil))
 	// ADR-0003 5.1: delta block after success line; omitted when nothing changed.
 	PrintDeltaBlock(out, deltaLines)
 	return nil
