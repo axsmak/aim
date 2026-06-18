@@ -255,7 +255,7 @@ func readJSONFile(t *testing.T, path string) map[string]interface{} {
 	return result
 }
 
-func TestClaudeCodeAdapter_InstallMCP_CreatesSettingsJSON(t *testing.T) {
+func TestClaudeCodeAdapter_InstallMCP_CreatesClaudeJSON(t *testing.T) {
 	home := t.TempDir()
 	baseDir := filepath.Join(home, ".claude")
 	if err := os.Mkdir(baseDir, 0755); err != nil {
@@ -267,7 +267,11 @@ func TestClaudeCodeAdapter_InstallMCP_CreatesSettingsJSON(t *testing.T) {
 		t.Fatalf("InstallMCP() error = %v", err)
 	}
 
-	cfg := readJSONFile(t, filepath.Join(baseDir, "settings.json"))
+	if _, err := os.Stat(filepath.Join(baseDir, "settings.json")); !os.IsNotExist(err) {
+		t.Errorf("settings.json should not be written by InstallMCP, stat err = %v", err)
+	}
+
+	cfg := readJSONFile(t, filepath.Join(home, ".claude.json"))
 	servers, ok := cfg["mcpServers"].(map[string]interface{})
 	if !ok {
 		t.Fatal("mcpServers missing or wrong type")
@@ -292,7 +296,7 @@ func TestClaudeCodeAdapter_InstallMCP_MergesExistingKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	existing := `{"existingKey":"value","mcpServers":{"other-server":{"command":"node","args":[]}}}`
-	if err := os.WriteFile(filepath.Join(baseDir, "settings.json"), []byte(existing), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(existing), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -301,7 +305,7 @@ func TestClaudeCodeAdapter_InstallMCP_MergesExistingKeys(t *testing.T) {
 		t.Fatalf("InstallMCP() error = %v", err)
 	}
 
-	cfg := readJSONFile(t, filepath.Join(baseDir, "settings.json"))
+	cfg := readJSONFile(t, filepath.Join(home, ".claude.json"))
 	if cfg["existingKey"] != "value" {
 		t.Error("existingKey lost after InstallMCP")
 	}
@@ -329,7 +333,7 @@ func TestClaudeCodeAdapter_InstallMCP_OverwritesSameServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := readJSONFile(t, filepath.Join(baseDir, "settings.json"))
+	cfg := readJSONFile(t, filepath.Join(home, ".claude.json"))
 	servers := cfg["mcpServers"].(map[string]interface{})
 	entry := servers["test-server"].(map[string]interface{})
 	env := entry["env"].(map[string]interface{})
@@ -350,11 +354,32 @@ func TestClaudeCodeAdapter_InstallMCP_NoEnvSection(t *testing.T) {
 		t.Fatalf("InstallMCP() error = %v", err)
 	}
 
-	cfg := readJSONFile(t, filepath.Join(baseDir, "settings.json"))
+	cfg := readJSONFile(t, filepath.Join(home, ".claude.json"))
 	servers := cfg["mcpServers"].(map[string]interface{})
 	entry := servers["test-server"].(map[string]interface{})
 	if _, ok := entry["env"]; ok {
 		t.Error("env section should be absent when envValues is nil")
+	}
+}
+
+func TestClaudeCodeAdapter_InstallMCP_RoundTripsThroughScanMCP(t *testing.T) {
+	home := t.TempDir()
+	baseDir := filepath.Join(home, ".claude")
+	if err := os.Mkdir(baseDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := adapter.NewClaudeCodeAdapter("")
+	if err := a.InstallMCP(testMCP, baseDir, map[string]string{"API_KEY": "secret"}); err != nil {
+		t.Fatalf("InstallMCP() error = %v", err)
+	}
+
+	got, err := a.ScanMCP(baseDir)
+	if err != nil {
+		t.Fatalf("ScanMCP() error = %v", err)
+	}
+	if len(got) != 1 || got[0].ServerName != "test-server" {
+		t.Fatalf("ScanMCP() after InstallMCP = %v, want one entry named test-server", got)
 	}
 }
 

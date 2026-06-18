@@ -51,10 +51,20 @@ func PrintDeltaBlock(w io.Writer, lines []string) {
 //
 //	<verb>: [<hash> · ] <N skill(s)>[, <M MCP server(s)>][ → <K environment(s)>]
 //
+// Skills install into every detected environment, but MCP servers install only
+// into the subset selected by their `targets`. When that subset is smaller than
+// the skill environment count (issue #120), a single shared "→ K environments"
+// suffix would misattribute the skill count to the MCP segment. In that case the
+// line splits into two arrow segments instead, naming the MCP servers' actual
+// environments:
+//
+//	<verb>: <N skill(s)> → <K environment(s)>, <M MCP server(s)> → <env1, env2, ...>
+//
 // hash: commit short-hash (pass "" if not commit-bound, e.g. apply).
 // skills, mcpServers: artifact counts. mcpServers=0 omits the MCP segment.
-// envs: environment count (pass 0 if op doesn't touch environments, e.g. push).
-func FormatSuccess(verb, hash string, skills, mcpServers, envs int) string {
+// skillEnvs: environment count skills were installed into (0 if op doesn't touch environments, e.g. push).
+// mcpEnvs: names of environments the MCP servers were installed into (nil if mcpServers=0).
+func FormatSuccess(verb, hash string, skills, mcpServers, skillEnvs int, mcpEnvs []string) string {
 	var sb strings.Builder
 	sb.WriteString(verb)
 	sb.WriteString(": ")
@@ -64,16 +74,29 @@ func FormatSuccess(verb, hash string, skills, mcpServers, envs int) string {
 		sb.WriteString(" · ")
 	}
 
+	// Require a non-empty mcpEnvs to call it divergent — an empty mcpEnvs alongside
+	// mcpServers>0 means targets matched no detected environment at all, which is a
+	// separate, pre-existing edge case; fall back to the shared-arrow rendering rather
+	// than printing a dangling "→ " with no environment names.
+	divergent := mcpServers > 0 && skillEnvs > 0 && len(mcpEnvs) > 0 && len(mcpEnvs) < skillEnvs
+
 	sb.WriteString(Plural(skills, "skill"))
 
-	if mcpServers > 0 {
+	if mcpServers > 0 && !divergent {
 		sb.WriteString(", ")
 		sb.WriteString(Plural(mcpServers, "MCP server"))
 	}
 
-	if envs > 0 {
+	if skillEnvs > 0 {
 		sb.WriteString(" → ")
-		sb.WriteString(Plural(envs, "environment"))
+		sb.WriteString(Plural(skillEnvs, "environment"))
+	}
+
+	if divergent {
+		sb.WriteString(", ")
+		sb.WriteString(Plural(mcpServers, "MCP server"))
+		sb.WriteString(" → ")
+		sb.WriteString(strings.Join(mcpEnvs, ", "))
 	}
 
 	return sb.String()

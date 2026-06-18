@@ -65,18 +65,18 @@ func TestSync_MCP_InstallsToClaudeCode(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")
-	data, err := os.ReadFile(settingsPath)
+	claudeJSONPath := filepath.Join(fakeHome, ".claude.json")
+	data, err := os.ReadFile(claudeJSONPath)
 	if err != nil {
-		t.Fatalf("settings.json not created: %v", err)
+		t.Fatalf(".claude.json not created: %v", err)
 	}
 	var cfg map[string]interface{}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("invalid JSON in settings.json: %v", err)
+		t.Fatalf("invalid JSON in .claude.json: %v", err)
 	}
 	servers, ok := cfg["mcpServers"].(map[string]interface{})
 	if !ok {
-		t.Fatal("mcpServers missing in settings.json")
+		t.Fatal("mcpServers missing in .claude.json")
 	}
 	if _, ok := servers["test-server"]; !ok {
 		t.Error("test-server not found in mcpServers")
@@ -113,9 +113,9 @@ func TestSync_MCP_InstallsToMultipleAdapters(t *testing.T) {
 	}
 
 	// Check Claude Code
-	claudeSettings := filepath.Join(fakeHome, ".claude", "settings.json")
-	if _, err := os.Stat(claudeSettings); err != nil {
-		t.Errorf("settings.json missing for claude-code: %v", err)
+	claudeJSONPath := filepath.Join(fakeHome, ".claude.json")
+	if _, err := os.Stat(claudeJSONPath); err != nil {
+		t.Errorf(".claude.json missing for claude-code: %v", err)
 	}
 
 	// Check Cursor
@@ -160,9 +160,9 @@ func TestSync_MCP_DryRun_DoesNotCreateFiles(t *testing.T) {
 		t.Errorf("expected 'MCP server' count in dry-run output, got: %s", stdout)
 	}
 
-	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")
-	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
-		t.Error("settings.json should NOT be created in dry-run mode")
+	claudeJSONPath := filepath.Join(fakeHome, ".claude.json")
+	if _, err := os.Stat(claudeJSONPath); !os.IsNotExist(err) {
+		t.Error(".claude.json should NOT be created in dry-run mode")
 	}
 }
 
@@ -222,17 +222,17 @@ func TestGitSync_MCPInstallFails_SyncedHashNotUpdated(t *testing.T) {
 	runGitHelper(t, srcWork, "push", "origin", "main")
 	runGitHelper(t, bareDir, "symbolic-ref", "HEAD", "refs/heads/main")
 
-	// Machine B: create .claude dir with read-only settings.json to force InstallMCP failure
+	// Machine B: create .claude dir + read-only ~/.claude.json to force InstallMCP failure
 	fakeHome := t.TempDir()
 	claudeDir := filepath.Join(fakeHome, ".claude")
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		t.Fatalf("mkdir .claude: %v", err)
 	}
-	settingsPath := filepath.Join(claudeDir, "settings.json")
-	if err := os.WriteFile(settingsPath, []byte(`{}`), 0444); err != nil { // read-only
-		t.Fatalf("write read-only settings.json: %v", err)
+	claudeJSONPath := filepath.Join(fakeHome, ".claude.json")
+	if err := os.WriteFile(claudeJSONPath, []byte(`{}`), 0444); err != nil { // read-only
+		t.Fatalf("write read-only .claude.json: %v", err)
 	}
-	t.Cleanup(func() { os.Chmod(settingsPath, 0644) }) // restore for cleanup
+	t.Cleanup(func() { os.Chmod(claudeJSONPath, 0644) }) // restore for cleanup
 
 	workDir := t.TempDir()
 	runGitHelper(t, "", "clone", bareDir, workDir)
@@ -256,7 +256,7 @@ func TestGitSync_MCPInstallFails_SyncedHashNotUpdated(t *testing.T) {
 	}
 	if syncErr == nil && cfg.SyncedHash != "" {
 		// If sync claimed success, synced_hash being set is only OK if MCP actually installed.
-		// But we forced a failure via read-only settings.json, so this indicates a bug.
+		// But we forced a failure via read-only .claude.json, so this indicates a bug.
 		t.Logf("Note: sync succeeded without error — MCP failure may not have propagated")
 	}
 	if syncErr != nil && cfg.SyncedHash != "" {
@@ -296,13 +296,13 @@ func TestSync_MCP_SavesEnvToLocalConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify the env was used in settings.json
-	settingsPath := filepath.Join(fakeHome, ".claude", "settings.json")
-	data, err := os.ReadFile(settingsPath)
+	// Verify the env was used in .claude.json
+	claudeJSONPath := filepath.Join(fakeHome, ".claude.json")
+	data, err := os.ReadFile(claudeJSONPath)
 	if err != nil {
-		t.Fatalf("settings.json not created: %v", err)
+		t.Fatalf(".claude.json not created: %v", err)
 	}
 	if !strings.Contains(string(data), "pre-set-key") {
-		t.Errorf("expected API key in settings.json, got: %s", string(data))
+		t.Errorf("expected API key in .claude.json, got: %s", string(data))
 	}
 }

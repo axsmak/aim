@@ -132,5 +132,9 @@ func (a ClaudeCodeAdapter) InstallSkill(s skill.Skill, baseDir string) error {
 }
 
 func (a ClaudeCodeAdapter) InstallMCP(m mcp.MCP, baseDir string, envValues map[string]string) error {
-	return installMCPJSON(filepath.Join(baseDir, "settings.json"), m, envValues)
+	// Claude Code reads user-scope MCP server definitions from ~/.claude.json, not
+	// settings.json (which only carries policy keys like allowedMcpServers). Mirror
+	// the home derivation ScanMCP uses (~/.claude → ~) so install and scan agree.
+	homeDir := filepath.Dir(baseDir)
+	return installMCPJSON(filepath.Join(homeDir, ".claude.json"), m, envValues)
 }
