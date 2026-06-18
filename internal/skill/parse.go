@@ -107,6 +107,15 @@ func parseFolderSkill(skillMDPath string, name string) (Skill, *ValidationError,
 	}, nil, nil
 }
 
+// ReadFolderSkill parses a folder-format skill given the path to its SKILL.md
+// file, deriving the skill name from the parent directory's name. Unlike
+// parseFolderSkill, this is exported for ingestion of folder skills from
+// arbitrary external paths (not just skillsDir/*/SKILL.md during ReadAll).
+func ReadFolderSkill(skillMDPath string) (Skill, *ValidationError, error) {
+	name := filepath.Base(filepath.Dir(skillMDPath))
+	return parseFolderSkill(skillMDPath, name)
+}
+
 // ParseRaw parses a skill from raw bytes. sourcePath is used only for error reporting.
 func ParseRaw(raw []byte, sourcePath string) (Skill, *ValidationError, error) {
 	fm, body, ok := splitFrontmatter(raw)

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/axsmak/aim/internal/adder"
 	"github.com/axsmak/aim/internal/errs"
@@ -34,7 +35,34 @@ func newAddSkillCmd() *cobra.Command {
 			}
 			workDir := resolveWorkDir(homeDir)
 
+			opts := adder.AddOptions{
+				WorkDir:   workDir,
+				Name:      name,
+				Overwrite: overwrite,
+			}
+
 			src := args[0]
+			if src != "-" {
+				info, statErr := os.Stat(src)
+				if statErr != nil {
+					return fmt.Errorf("cannot open %s: %w", src, statErr)
+				}
+				// A directory or a path to SKILL.md is always a folder-format
+				// skill — both forms must ingest the same way (issue #140).
+				if info.IsDir() || filepath.Base(src) == "SKILL.md" {
+					dirPath := src
+					if !info.IsDir() {
+						dirPath = filepath.Dir(src)
+					}
+					result, err := adder.AddSkillDir(dirPath, opts)
+					if err != nil {
+						return err
+					}
+					printSkillAddResult(cmd, result)
+					return nil
+				}
+			}
+
 			var r *os.File
 			if src == "-" {
 				r = os.Stdin
@@ -47,21 +75,11 @@ func newAddSkillCmd() *cobra.Command {
 				r = f
 			}
 
-			opts := adder.AddOptions{
-				WorkDir:   workDir,
-				Name:      name,
-				Overwrite: overwrite,
-			}
-
 			result, err := adder.Add("skill", r, opts)
 			if err != nil {
 				return err
 			}
-			if result.Identical {
-				fmt.Fprintf(cmd.OutOrStdout(), "up to date: skill %s · already identical\n", result.Name)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "added: skill %s\n", result.Name)
-			}
+			printSkillAddResult(cmd, result)
 			return nil
 		},
 	}
@@ -69,6 +87,14 @@ func newAddSkillCmd() *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "", "override skill name from frontmatter")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace existing skill if content differs")
 	return cmd
+}
+
+func printSkillAddResult(cmd *cobra.Command, result adder.AddResult) {
+	if result.Identical {
+		fmt.Fprintf(cmd.OutOrStdout(), "up to date: skill %s · already identical\n", result.Name)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "added: skill %s\n", result.Name)
+	}
 }
 
 func newAddMCPCmd() *cobra.Command {

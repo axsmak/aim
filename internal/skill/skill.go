@@ -27,6 +27,29 @@ func (e ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.FilePath, e.Field, e.Message)
 }
 
+// WriteTo writes s into baseDir/skills/<s.Name>/SKILL.md. For folder-format
+// skills (s.SourceDir != "") every path in s.RefFiles is also copied from
+// s.SourceDir alongside SKILL.md.
+func WriteTo(s Skill, baseDir string) error {
+	destDir := filepath.Join(baseDir, "skills", s.Name)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(destDir, "SKILL.md"), s.Raw, 0644); err != nil {
+		return err
+	}
+	for _, ref := range s.RefFiles {
+		data, err := os.ReadFile(filepath.Join(s.SourceDir, ref))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(destDir, ref), data, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ReadAll reads all *.md files from skillsDir.
 // Returns valid skills, per-file validation errors, and a system error if the directory can't be read.
 func ReadAll(skillsDir string) (valid []Skill, invalid []ValidationError, err error) {
