@@ -48,25 +48,59 @@ func runStatus(workDir string, git gitops.Ops, out, errOut io.Writer) error {
 	fetchErr := fetchWithTimeout(git, workDir, fetchTimeout)
 	remoteUnreachable := fetchErr != nil
 
+	posText, ahead, behind, unreachable := statusPosition(workDir, git, remoteUnreachable, errOut)
+	envText, needsSync := statusEnvStatus(workDir, git, cfg, headHash)
+
 	fmt.Fprintf(out, "Repository:   %s\n", cfg.Repo)
-	fmt.Fprintf(out, "Position:     %s\n", statusPosition(workDir, git, remoteUnreachable, errOut))
-	fmt.Fprintf(out, "Environments: %s\n", statusEnvStatus(workDir, git, cfg, headHash))
+	fmt.Fprintf(out, "Position:     %s\n", posText)
+	fmt.Fprintf(out, "Environments: %s\n", envText)
 
 	delta := statusDelta(workDir, git)
+	hasDelta := len(delta) > 0
 
 	fmt.Fprintln(out)
-	if len(delta) == 0 {
+	if hasDelta {
+		fmt.Fprintln(out, "Changes not yet published (origin/main → working tree):")
+		for _, d := range TruncateDelta(delta, deltaTruncateThreshold) {
+			fmt.Fprintln(out, d)
+		}
+	} else {
 		fmt.Fprintln(out, "Working tree matches origin/main · nothing to publish")
+	}
+
+	syncHint := statusSyncHint(unreachable, ahead, behind, needsSync)
+	if !hasDelta && syncHint == "" {
 		return nil
 	}
 
-	fmt.Fprintln(out, "Changes not yet published (origin/main → working tree):")
-	for _, d := range TruncateDelta(delta, deltaTruncateThreshold) {
-		fmt.Fprintln(out, d)
-	}
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  run aiman push to publish")
+	if hasDelta {
+		fmt.Fprintln(out, "  run aiman push to publish")
+	}
+	if syncHint != "" {
+		fmt.Fprintln(out, "  "+syncHint)
+	}
 	return nil
+}
+
+// statusSyncHint reports the action needed to bring environments up to date,
+// per ADR-0003 4.10 / 02-message-design.md 3.1(d,f). Behind/diverged take
+// priority over a generic needs-sync state since they name the actual cause.
+// No hint is printed when the remote is unreachable: aiman sync needs the
+// same remote and would fail with the warning status just reported.
+func statusSyncHint(unreachable bool, ahead, behind int, needsSync bool) string {
+	switch {
+	case unreachable:
+		return ""
+	case ahead > 0 && behind > 0:
+		return "history diverged — resolve with git, then run aiman sync"
+	case behind > 0:
+		return "run aiman sync to apply remote changes"
+	case needsSync:
+		return "run aiman sync to apply"
+	default:
+		return ""
+	}
 }
 
 // fetchWithTimeout calls git.Fetch in a goroutine and returns an error if it
@@ -84,41 +118,45 @@ func fetchWithTimeout(git gitops.Ops, workDir string, timeout time.Duration) err
 	}
 }
 
-func statusPosition(workDir string, git gitops.Ops, remoteUnreachable bool, errOut io.Writer) string {
+// statusPosition reports the working tree's position relative to origin/main,
+// plus the raw ahead/behind counts and unreachable flag for hint selection.
+func statusPosition(workDir string, git gitops.Ops, remoteUnreachable bool, errOut io.Writer) (text string, ahead, behind int, unreachable bool) {
 	if remoteUnreachable {
 		fmt.Fprintln(errOut, "warning: cannot reach remote repository")
-		return "unknown (remote unreachable)"
+		return "unknown (remote unreachable)", 0, 0, true
 	}
 	ahead, behind, err := git.CountAheadBehind(workDir, "origin/main", "HEAD")
 	if err != nil {
 		fmt.Fprintln(errOut, "warning: cannot reach remote repository")
-		return "unknown (remote unreachable)"
+		return "unknown (remote unreachable)", 0, 0, true
 	}
 	switch {
 	case ahead > 0 && behind == 0:
-		return fmt.Sprintf("%s ahead of origin/main", Plural(ahead, "commit"))
+		return fmt.Sprintf("%s ahead of origin/main", Plural(ahead, "commit")), ahead, behind, false
 	case behind > 0 && ahead == 0:
-		return fmt.Sprintf("%s behind of origin/main", Plural(behind, "commit"))
+		return fmt.Sprintf("%s behind of origin/main", Plural(behind, "commit")), ahead, behind, false
 	case ahead > 0 && behind > 0:
 		return fmt.Sprintf("diverged from origin/main (%s ahead, %s behind)",
-			Plural(ahead, "commit"), Plural(behind, "commit"))
+			Plural(ahead, "commit"), Plural(behind, "commit")), ahead, behind, false
 	default:
-		return "up-to-date with origin/main"
+		return "up-to-date with origin/main", ahead, behind, false
 	}
 }
 
-func statusEnvStatus(workDir string, git gitops.Ops, cfg localconfig.Config, headHash string) string {
+// statusEnvStatus reports whether environments match the synced hash, plus
+// a needsSync flag for hint selection.
+func statusEnvStatus(workDir string, git gitops.Ops, cfg localconfig.Config, headHash string) (text string, needsSync bool) {
 	if cfg.SyncedHash == "" {
-		return "unknown"
+		return "unknown", false
 	}
 	if cfg.SyncedHash == headHash {
-		return fmt.Sprintf("applied (synced %s)", shortHash(cfg.SyncedHash))
+		return fmt.Sprintf("applied (synced %s)", shortHash(cfg.SyncedHash)), false
 	}
 	aheadFromSynced, _, err := git.CountAheadBehind(workDir, cfg.SyncedHash, headHash)
 	if err != nil {
-		return "needs sync"
+		return "needs sync", true
 	}
-	return fmt.Sprintf("needs sync (%s not applied)", Plural(aheadFromSynced, "commit"))
+	return fmt.Sprintf("needs sync (%s not applied)", Plural(aheadFromSynced, "commit")), true
 }
 
 func statusDelta(workDir string, git gitops.Ops) []string {

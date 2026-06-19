@@ -167,11 +167,76 @@ func TestRunStatus_Position_Behind_Hint(t *testing.T) {
 	if err := runStatus(dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// 4.10: behind → no delta → "Working tree matches" + hint via push path
-	// The hint "run aiman sync" comes via the Environments "needs sync" flow,
-	// but the Position hint is printed only in the delta/push section.
-	// Verify the behind text is correct.
-	assertContains(t, out.String(), "behind of origin/main")
+	// ADR-0003 4.10: behind → sync hint naming the remote cause.
+	got := out.String()
+	assertContains(t, got, "behind of origin/main")
+	assertContains(t, got, "  run aiman sync to apply remote changes")
+}
+
+func TestRunStatus_Position_Diverged_Hint(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
+	git := &fakeGitOps{
+		headHashResult: "abc1234567890",
+	}
+	git.countAheadBehindFn = func(dir, base, ref string) (int, int, error) {
+		return 1, 1, nil
+	}
+	var out, errOut bytes.Buffer
+	if err := runStatus(dir, git, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// ADR-0003 4.10: diverged → resolve-with-git hint, distinct from plain behind.
+	assertContains(t, out.String(), "  history diverged — resolve with git, then run aiman sync")
+}
+
+func TestRunStatus_NeedsSync_Hint(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "oldhash1234567")
+	git := &fakeGitOps{headHashResult: "newhash1234567"}
+	git.countAheadBehindFn = func(dir, base, ref string) (int, int, error) {
+		if base == "oldhash1234567" {
+			return 1, 0, nil
+		}
+		return 0, 0, nil
+	}
+	var out, errOut bytes.Buffer
+	if err := runStatus(dir, git, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// ADR-0003 4.10: position up-to-date but environments stale → generic sync hint.
+	got := out.String()
+	assertContains(t, got, "Working tree matches origin/main · nothing to publish")
+	assertContains(t, got, "  run aiman sync to apply")
+}
+
+func TestRunStatus_PushAndSyncHints_BothPrinted(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "oldhash1234567")
+	git := &fakeGitOps{
+		headHashResult: "newhash1234567",
+		diffNameStatusResult: []string{
+			"M\tskills/commit-message.md",
+		},
+	}
+	git.countAheadBehindFn = func(dir, base, ref string) (int, int, error) {
+		if base == "oldhash1234567" {
+			return 1, 0, nil
+		}
+		return 0, 0, nil
+	}
+	var out, errOut bytes.Buffer
+	if err := runStatus(dir, git, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// ADR-0003 4.10: both unpublished changes and stale environments → both hints,
+	// push before sync, each on its own line.
+	got := out.String()
+	pushIdx := strings.Index(got, "run aiman push to publish")
+	syncIdx := strings.Index(got, "run aiman sync to apply")
+	if pushIdx == -1 || syncIdx == -1 {
+		t.Fatalf("expected both hints, got: %q", got)
+	}
+	if pushIdx > syncIdx {
+		t.Errorf("expected push hint before sync hint, got: %q", got)
+	}
 }
 
 func TestRunStatus_Position_Diverged(t *testing.T) {
@@ -220,6 +285,28 @@ func TestRunStatus_Position_Unreachable_FetchFail(t *testing.T) {
 	assertContains(t, out.String(), "Position:     unknown (remote unreachable)")
 	// 4.10 / 5.4: warning in stderr
 	assertContains(t, errOut.String(), "warning: cannot reach remote repository")
+}
+
+func TestRunStatus_Unreachable_NoSyncHint_EvenWithNeedsSync(t *testing.T) {
+	// Code review fix: aiman sync needs the same remote status just failed to
+	// reach, so suggesting it here would point to a command that fails too.
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "oldhash1234567")
+	git := &fakeGitOps{
+		headHashResult: "newhash1234567",
+		fetchErr:       errors.New("connection refused"),
+	}
+	git.countAheadBehindFn = func(dir, base, ref string) (int, int, error) {
+		return 1, 0, nil // needsSync from synced_hash vs HEAD, no remote call
+	}
+	var out, errOut bytes.Buffer
+	if err := runStatus(dir, git, &out, &errOut); err != nil {
+		t.Fatalf("expected exit 0, got error: %v", err)
+	}
+	got := out.String()
+	assertContains(t, got, "Environments: needs sync (1 commit not applied)")
+	if strings.Contains(got, "run aiman sync") {
+		t.Errorf("expected no sync hint when remote is unreachable, got: %q", got)
+	}
 }
 
 func TestRunStatus_Position_Unreachable_CountAheadBehindFail(t *testing.T) {
