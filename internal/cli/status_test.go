@@ -287,6 +287,28 @@ func TestRunStatus_Position_Unreachable_FetchFail(t *testing.T) {
 	assertContains(t, errOut.String(), "warning: cannot reach remote repository")
 }
 
+func TestRunStatus_Unreachable_NoSyncHint_EvenWithNeedsSync(t *testing.T) {
+	// Code review fix: aiman sync needs the same remote status just failed to
+	// reach, so suggesting it here would point to a command that fails too.
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "oldhash1234567")
+	git := &fakeGitOps{
+		headHashResult: "newhash1234567",
+		fetchErr:       errors.New("connection refused"),
+	}
+	git.countAheadBehindFn = func(dir, base, ref string) (int, int, error) {
+		return 1, 0, nil // needsSync from synced_hash vs HEAD, no remote call
+	}
+	var out, errOut bytes.Buffer
+	if err := runStatus(dir, git, &out, &errOut); err != nil {
+		t.Fatalf("expected exit 0, got error: %v", err)
+	}
+	got := out.String()
+	assertContains(t, got, "Environments: needs sync (1 commit not applied)")
+	if strings.Contains(got, "run aiman sync") {
+		t.Errorf("expected no sync hint when remote is unreachable, got: %q", got)
+	}
+}
+
 func TestRunStatus_Position_Unreachable_CountAheadBehindFail(t *testing.T) {
 	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
 	git := &fakeGitOps{

@@ -86,12 +86,11 @@ func runStatus(workDir string, git gitops.Ops, out, errOut io.Writer) error {
 // statusSyncHint reports the action needed to bring environments up to date,
 // per ADR-0003 4.10 / 02-message-design.md 3.1(d,f). Behind/diverged take
 // priority over a generic needs-sync state since they name the actual cause.
+// No hint is printed when the remote is unreachable: aiman sync needs the
+// same remote and would fail with the warning status just reported.
 func statusSyncHint(unreachable bool, ahead, behind int, needsSync bool) string {
 	switch {
 	case unreachable:
-		if needsSync {
-			return "run aiman sync to apply"
-		}
 		return ""
 	case ahead > 0 && behind > 0:
 		return "history diverged — resolve with git, then run aiman sync"
