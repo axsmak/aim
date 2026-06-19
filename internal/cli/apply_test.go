@@ -79,6 +79,52 @@ func TestApply_InstallsSkill(t *testing.T) {
 	}
 }
 
+// TestApply_MCPNoTargetMatch_StillCountedInSuccessLine guards against a regression
+// where installMCPs only counted an MCP server toward mcpCount if it matched at
+// least one detected adapter's target. A server whose targets don't match any
+// detected environment (typo, or environment not present on this machine) would
+// silently vanish from the "applied:" success line instead of being reported as
+// installed in 0 environments (issue #141).
+func TestApply_MCPNoTargetMatch_StillCountedInSuccessLine(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", "test-skill.md"),
+		[]byte(validSkillContent),
+		0644,
+	); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	mcpDir := filepath.Join(workDir, "mcp")
+	if err := os.MkdirAll(mcpDir, 0755); err != nil {
+		t.Fatalf("mkdir mcp: %v", err)
+	}
+	noMatchMCPContent := `name: orphan-server
+description: MCP server targeting an environment never detected on this machine
+command: npx
+args:
+  - "-y"
+  - orphan-mcp-pkg
+targets:
+  - unknown-env
+env: []
+`
+	if err := os.WriteFile(filepath.Join(mcpDir, "orphan-server.yaml"), []byte(noMatchMCPContent), 0644); err != nil {
+		t.Fatalf("write orphan-server.yaml: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "1 MCP server") {
+		t.Errorf("expected orphan MCP server to still be counted in success line, got: %q", stdout)
+	}
+}
+
 func TestApply_DryRun_WritesNothing(t *testing.T) {
 	fakeHome := t.TempDir()
 	workDir := setupApplyWorkDir(t, fakeHome)

@@ -354,6 +354,7 @@ func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.R
 	if len(items) == 0 {
 		return 0, nil, nil
 	}
+	mcpCount = len(items)
 
 	var hadInstallError bool
 	for _, a := range adapter.DefaultAdapters(*cfg) {
@@ -385,7 +386,6 @@ func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.R
 		}
 		if installed > 0 {
 			envNames = append(envNames, a.Name())
-			mcpCount = len(items)
 		}
 	}
 	if hadInstallError {
