@@ -107,7 +107,11 @@ type skillDelta struct {
 // The function is called BEFORE installation so that the snapshot reflects
 // the pre-install state. It is reused by both runApply and runApplyDryRun.
 //
-// ADR-0003 5.1: category D (deletion from env) is out of scope.
+// ADR-0003 5.1: category D (deletion from env) stays out of scope HERE — the
+// ordinary apply path is additive (A/M only). ADR-0004 (decision 7) revises
+// that record exclusively for the loadout path: apply --loadout gets D through
+// the reconciliation engine (BuildReconcilePlan in reconcile.go), which shares
+// the sha256 comparison below via skillEnvCategory.
 func computeApplyDelta(validSkills []skill.Skill, adapters []adapter.Adapter, baseDirs []string, dryRun bool) []string {
 	if len(adapters) == 0 {
 		return nil
@@ -121,27 +125,21 @@ func computeApplyDelta(validSkills []skill.Skill, adapters []adapter.Adapter, ba
 		// here. See issue #138 for a planned follow-up.
 		inventoryHash := sha256.Sum256(s.Raw)
 		for i, a := range adapters {
-			installedPath := filepath.Join(baseDirs[i], "skills", s.Name, "SKILL.md")
-			raw, readErr := os.ReadFile(installedPath)
-			if readErr != nil {
-				// File not present in this env.
+			switch skillEnvCategory(baseDirs[i], s.Name, inventoryHash) {
+			case "A":
+				// Skill not present in this env. An entry that already exists
+				// keeps its category (first-seen wins, as before the refactor).
 				d := deltaMap[s.Name]
 				if d == nil {
 					d = &skillDelta{category: "A"}
 					deltaMap[s.Name] = d
 				}
 				d.envNames = append(d.envNames, a.Name())
-				continue
-			}
-			installedHash := sha256.Sum256(raw)
-			if installedHash != inventoryHash {
+			case "M":
 				d := deltaMap[s.Name]
 				if d == nil {
 					d = &skillDelta{category: "M"}
 					deltaMap[s.Name] = d
-				} else if d.category != "A" {
-					// Keep "A" if already set (missing in other envs takes precedence).
-					d.category = "M"
 				}
 				d.envNames = append(d.envNames, a.Name())
 			}
