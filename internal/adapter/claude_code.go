@@ -138,3 +138,14 @@ func (a ClaudeCodeAdapter) InstallMCP(m mcp.MCP, baseDir string, envValues map[s
 	homeDir := filepath.Dir(baseDir)
 	return installMCPJSON(filepath.Join(homeDir, ".claude.json"), m, envValues)
 }
+
+func (a ClaudeCodeAdapter) RemoveSkill(name string, baseDir string) error {
+	return removeSkillDir(name, baseDir)
+}
+
+func (a ClaudeCodeAdapter) RemoveMCP(name string, baseDir string) error {
+	// Mirror InstallMCP: user-scope MCP servers live in ~/.claude.json.
+	// settings.json is never written by install, so removal leaves it alone.
+	homeDir := filepath.Dir(baseDir)
+	return removeMCPJSON(filepath.Join(homeDir, ".claude.json"), name)
+}

@@ -50,3 +50,11 @@ func (a CursorAdapter) InstallSkill(s skill.Skill, baseDir string) error {
 func (a CursorAdapter) InstallMCP(m mcp.MCP, baseDir string, envValues map[string]string) error {
 	return installMCPJSON(filepath.Join(baseDir, "mcp.json"), m, envValues)
 }
+
+func (a CursorAdapter) RemoveSkill(name string, baseDir string) error {
+	return removeSkillDir(name, baseDir)
+}
+
+func (a CursorAdapter) RemoveMCP(name string, baseDir string) error {
+	return removeMCPJSON(filepath.Join(baseDir, "mcp.json"), name)
+}
