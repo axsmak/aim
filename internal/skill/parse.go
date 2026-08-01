@@ -83,17 +83,31 @@ func parseFolderSkill(skillMDPath string, name string) (Skill, *ValidationError,
 		return Skill{}, &ValidationError{FilePath: skillMDPath, Field: "body", Message: "must not be empty"}, nil
 	}
 
-	// Collect reference files: everything in the folder except SKILL.md, non-recursive.
+	// Collect reference files: every file under the folder except the root
+	// SKILL.md, recursively, as paths relative to the skill directory. Skills
+	// commonly keep templates in subdirectories (e.g. references/*.tpl.md);
+	// a non-recursive listing silently dropped them (issue #145).
 	dir := filepath.Dir(skillMDPath)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return Skill{}, nil, err
-	}
 	var refFiles []string
-	for _, e := range entries {
-		if !e.IsDir() && e.Name() != "SKILL.md" {
-			refFiles = append(refFiles, e.Name())
+	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "SKILL.md" {
+			return nil
+		}
+		refFiles = append(refFiles, rel)
+		return nil
+	})
+	if walkErr != nil {
+		return Skill{}, nil, walkErr
 	}
 
 	return Skill{
