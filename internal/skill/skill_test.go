@@ -404,6 +404,94 @@ func TestWriteTo_FolderSkill_CopiesRefFiles(t *testing.T) {
 	}
 }
 
+// writeNestedFile writes content to dir/relPath, creating parent directories.
+func writeNestedFile(t *testing.T, dir, relPath, content string) {
+	t.Helper()
+	path := filepath.Join(dir, relPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("writeNestedFile: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("writeNestedFile: %v", err)
+	}
+}
+
+func TestReadFolderSkill_NestedRefFilesCollected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-spec", validFolderSkillContent)
+	writeNestedFile(t, skillDir, filepath.Join("references", "backend.tpl.md"), "# Backend")
+	writeNestedFile(t, skillDir, filepath.Join("references", "qa.tpl.md"), "# QA")
+	writeFile(t, skillDir, "patterns.md", "# Patterns")
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve != nil {
+		t.Fatalf("unexpected validation error: %v", ve)
+	}
+	want := []string{
+		"patterns.md",
+		filepath.Join("references", "backend.tpl.md"),
+		filepath.Join("references", "qa.tpl.md"),
+	}
+	if len(s.RefFiles) != len(want) {
+		t.Fatalf("RefFiles = %v, want %v", s.RefFiles, want)
+	}
+	got := make(map[string]bool, len(s.RefFiles))
+	for _, ref := range s.RefFiles {
+		got[ref] = true
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("RefFiles = %v, missing %q", s.RefFiles, w)
+		}
+	}
+}
+
+func TestReadAll_FolderSkill_NestedRefFilesCollected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-spec", validFolderSkillContent)
+	writeNestedFile(t, skillDir, filepath.Join("references", "backend.tpl.md"), "# Backend")
+
+	valid, _, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	s := valid[0]
+	if len(s.RefFiles) != 1 || s.RefFiles[0] != filepath.Join("references", "backend.tpl.md") {
+		t.Errorf("RefFiles = %v, want [references/backend.tpl.md]", s.RefFiles)
+	}
+}
+
+func TestWriteTo_FolderSkill_CopiesNestedRefFiles(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "write-spec", validFolderSkillContent)
+	writeNestedFile(t, skillDir, filepath.Join("references", "backend.tpl.md"), "# Backend\nTemplate.")
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil || ve != nil {
+		t.Fatalf("setup: ReadFolderSkill failed: err=%v ve=%v", err, ve)
+	}
+
+	baseDir := t.TempDir()
+	if err := skill.WriteTo(s, baseDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	destDir := filepath.Join(baseDir, "skills", "write-spec")
+	got, err := os.ReadFile(filepath.Join(destDir, "references", "backend.tpl.md"))
+	if err != nil {
+		t.Fatalf("nested reference file not copied: %v", err)
+	}
+	if string(got) != "# Backend\nTemplate." {
+		t.Error("nested reference file content mismatch")
+	}
+}
+
 func TestReadAll_FolderSkill_BothFlatAndFolder(t *testing.T) {
 	dir := t.TempDir()
 	// Valid flat skill "a"

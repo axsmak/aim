@@ -43,7 +43,12 @@ func WriteTo(s Skill, baseDir string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(destDir, ref), data, 0644); err != nil {
+		dest := filepath.Join(destDir, ref)
+		// Ref paths may be nested (e.g. references/backend.tpl.md).
+		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dest, data, 0644); err != nil {
 			return err
 		}
 	}
