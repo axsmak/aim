@@ -18,7 +18,7 @@ type MCPScanner interface {
 
 type DiscoveredMCP struct {
 	ServerName string
-	Source     string            // "cursor" | "claude-code" | "codex"
+	Source     string // "cursor" | "claude-code" | "codex"
 	Command    string
 	Args       []string
 	Env        map[string]string // real values — stripped in importer
