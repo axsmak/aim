@@ -119,9 +119,14 @@ aiman push
 │   └── review-code.md
 ├── mcp/
 │   └── context7.yaml
+├── loadouts/
+│   └── documentation-work.yaml
 ├── aim.yaml
 └── .gitignore
 ```
+
+`loadouts/` is optional: each file names a subset of the inventory that can be
+applied on demand (see Loadouts below).
 
 `aim.local.yaml` is created locally on each machine and must not be committed.
 It stores machine-specific paths, sync markers, and MCP environment values.
@@ -169,6 +174,35 @@ env:
 Required env values are requested during sync and stored only in
 `aim.local.yaml`.
 
+## Loadouts
+
+A loadout is a named subset of the inventory for context switching, stored as
+`loadouts/<name>.yaml`:
+
+```yaml
+name: Documentation Work
+description: Skills and MCP servers for documentation tasks
+items:
+  - skill:create-spec
+  - skill:wpage
+  - mcp:context7
+```
+
+`aiman apply --loadout <name>` reconciles every detected AI environment exactly
+to that set, within the namespace AIM manages (everything that exists in the
+inventory as `skills/<name>` or `mcp/<name>`). Inventory items outside the
+loadout are removed from the environments; files AIM does not know about are
+never touched. Preview the full A/M/D plan first:
+
+```bash
+aiman apply --loadout documentation-work --dry-run
+aiman apply --loadout documentation-work
+```
+
+Plain `aiman apply` and `aiman sync` stay additive and apply the whole
+inventory. `aiman push` validates `loadouts/` (format and reference integrity)
+before publishing.
+
 ## Commands
 
 | Command | Purpose |
@@ -176,6 +210,7 @@ Required env values are requested during sync and stored only in
 | `aiman init <repo-url> [--path <dir>]` | Clone/connect an inventory repository and create local config |
 | `aiman switch <path>` | Switch the active inventory repository |
 | `aiman apply [--dry-run]` | Apply local inventory without Git operations |
+| `aiman apply --loadout <name> [--dry-run]` | Reconcile AI environments exactly to a named inventory subset |
 | `aiman push [--dry-run]` | Validate, commit, and push inventory changes |
 | `aiman sync [--dry-run] [--force]` | Fetch and apply the published inventory |
 | `aiman status` | Show local, remote, and environment sync state |
@@ -210,7 +245,11 @@ a rewrite of the core inventory model.
 - Claude Code, Cursor, and Codex CLI are the supported adapters today.
 - MCP support is focused on command-based stdio servers.
 - Secrets are local to each machine and must be entered again where required.
-- Named loadouts and richer inventory listing are planned, not current contract.
+- Richer inventory listing (`aiman list`) is planned, not current contract.
+- Loadout apply is global and stateless: a skill removed from the inventory
+  entirely is left behind in environments (no applied-state manifest yet), and
+  a manual skill sharing a name with an inventory item outside the loadout is
+  removed with it. Preview deletions with `--dry-run`.
 
 ## Documentation
 
