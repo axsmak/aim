@@ -17,25 +17,25 @@ var noReader = strings.NewReader("")
 
 // fakeGitOps is a configurable gitops.Ops for testing CLI commands without real git.
 type fakeGitOps struct {
-	cloneErr              error
-	cloned                bool
-	fetchErr              error
-	lsRemoteResult        string
-	lsRemoteErr           error
-	commitErr             error
-	commitCalled          bool
-	pushErr               error
-	pushCalled            bool
-	resetSoftCalled       bool
-	headHashResult        string
-	isFileStagedResult    map[string]bool
-	isAncestorResult      bool
-	isAncestorErr         error
-	diffNameStatusResult  []string
-	diffNameStatusErr     error
-	listUntrackedResult   []string
-	listUntrackedErr      error
-	countAheadBehindFn    func(dir, base, ref string) (int, int, error)
+	cloneErr             error
+	cloned               bool
+	fetchErr             error
+	lsRemoteResult       string
+	lsRemoteErr          error
+	commitErr            error
+	commitCalled         bool
+	pushErr              error
+	pushCalled           bool
+	resetSoftCalled      bool
+	headHashResult       string
+	isFileStagedResult   map[string]bool
+	isAncestorResult     bool
+	isAncestorErr        error
+	diffNameStatusResult []string
+	diffNameStatusErr    error
+	listUntrackedResult  []string
+	listUntrackedErr     error
+	countAheadBehindFn   func(dir, base, ref string) (int, int, error)
 }
 
 func (f *fakeGitOps) Clone(url, dir string) error                         { f.cloned = true; return f.cloneErr }
@@ -51,10 +51,12 @@ func (f *fakeGitOps) HeadHash(dir string) (string, error) {
 	return h, nil
 }
 func (f *fakeGitOps) RemoteHash(dir, ref string) (string, error) { return "abc1234", nil }
-func (f *fakeGitOps) LsRemote(dir, ref string) (string, error)   { return f.lsRemoteResult, f.lsRemoteErr }
-func (f *fakeGitOps) Commit(dir, msg string) error               { f.commitCalled = true; return f.commitErr }
-func (f *fakeGitOps) Push(dir string) error                      { f.pushCalled = true; return f.pushErr }
-func (f *fakeGitOps) ResetSoft(dir string) error                 { f.resetSoftCalled = true; return nil }
+func (f *fakeGitOps) LsRemote(dir, ref string) (string, error) {
+	return f.lsRemoteResult, f.lsRemoteErr
+}
+func (f *fakeGitOps) Commit(dir, msg string) error { f.commitCalled = true; return f.commitErr }
+func (f *fakeGitOps) Push(dir string) error        { f.pushCalled = true; return f.pushErr }
+func (f *fakeGitOps) ResetSoft(dir string) error   { f.resetSoftCalled = true; return nil }
 func (f *fakeGitOps) IsFileStaged(workDir, path string) (bool, error) {
 	return f.isFileStagedResult[path], nil
 }
@@ -78,7 +80,7 @@ func (f *fakeGitOps) DiffNameStatus(dir, ref string, paths []string) ([]string, 
 func (f *fakeGitOps) ListUntrackedInPaths(dir string, paths []string) ([]string, error) {
 	return f.listUntrackedResult, f.listUntrackedErr
 }
-func (f *fakeGitOps) DiffSyncDelta(workDir string) ([]string, error) { return nil, nil }
+func (f *fakeGitOps) DiffSyncDelta(workDir string) ([]string, error)      { return nil, nil }
 func (f *fakeGitOps) CleanUntracked(workDir string, paths []string) error { return nil }
 
 var _ gitops.Ops = (*fakeGitOps)(nil)

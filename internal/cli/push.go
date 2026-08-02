@@ -10,6 +10,7 @@ import (
 
 	"github.com/axsmak/aim/internal/errs"
 	"github.com/axsmak/aim/internal/gitops"
+	"github.com/axsmak/aim/internal/loadout"
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/axsmak/aim/internal/mcp"
 	"github.com/axsmak/aim/internal/skill"
@@ -93,6 +94,30 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 	for _, e := range mcpInvalid {
 		fmt.Fprintf(errOut, "error: %s\n", e)
 		hasErrors = true
+	}
+
+	// Validate loadouts (BFT 5.2): format invariants plus reference integrity
+	// against skills/ and mcp/. A repository without loadouts/ is untouched —
+	// List returns empty results and this block is a no-op. All errors are
+	// reported at once (US-L04), together with any MCP errors above.
+	loadouts, loadoutErrs, loadoutWarns, err := loadout.List(filepath.Join(workDir, "loadouts"))
+	if err != nil {
+		return err
+	}
+	for _, w := range loadoutWarns {
+		fmt.Fprintf(errOut, "warning: %s\n", w)
+	}
+	for _, ve := range loadoutErrs {
+		fmt.Fprintf(errOut, "error: %s\n", ve)
+		hasErrors = true
+	}
+	for _, l := range loadouts {
+		broken := loadout.CheckRefs(l, filepath.Join(workDir, "skills"), filepath.Join(workDir, "mcp"))
+		for _, re := range broken {
+			// BFT 5.2 sample message: hint points at the file and its items field.
+			fmt.Fprintf(errOut, "error: %s\n  hint: check loadouts/%s → items\n", re, filepath.Base(re.FilePath))
+			hasErrors = true
+		}
 	}
 	if hasErrors {
 		return fmt.Errorf("validation failed — fix errors before publishing")

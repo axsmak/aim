@@ -139,6 +139,14 @@ func (a CodexAdapter) InstallMCP(m mcp.MCP, baseDir string, envValues map[string
 	return installMCPTOML(configPath, m, envValues)
 }
 
+func (a CodexAdapter) RemoveSkill(name string, baseDir string) error {
+	return removeSkillDir(name, baseDir)
+}
+
+func (a CodexAdapter) RemoveMCP(name string, baseDir string) error {
+	return removeMCPTOML(filepath.Join(baseDir, "config.toml"), name)
+}
+
 func installMCPTOML(configPath string, m mcp.MCP, envValues map[string]string) error {
 	var config map[string]interface{}
 
@@ -172,6 +180,37 @@ func installMCPTOML(configPath string, m mcp.MCP, envValues map[string]string) e
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 		return err
 	}
+
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(config); err != nil {
+		return err
+	}
+	return os.WriteFile(configPath, buf.Bytes(), 0644)
+}
+
+// removeMCPTOML deletes the mcp_servers entry keyed by name from a TOML config
+// file, preserving every other key. A missing file or key is a no-op: nothing
+// is written and no config file is created as a side effect.
+func removeMCPTOML(configPath, name string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var config map[string]interface{}
+	if _, err := toml.Decode(string(data), &config); err != nil {
+		return err
+	}
+
+	servers, _ := config["mcp_servers"].(map[string]interface{})
+	if _, ok := servers[name]; !ok {
+		return nil
+	}
+	delete(servers, name)
+	config["mcp_servers"] = servers
 
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(config); err != nil {

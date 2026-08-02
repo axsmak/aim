@@ -91,6 +91,26 @@ func installMCPJSON(configPath string, m mcp.MCP, envValues map[string]string) e
 	return writeJSONConfig(configPath, config)
 }
 
+// removeMCPJSON deletes the mcpServers entry keyed by name from a JSON config
+// file. Every other key — inside and outside mcpServers — is preserved. When
+// the file or the key does not exist nothing is written, so removal is
+// idempotent and never creates a config file as a side effect.
+func removeMCPJSON(configPath, name string) error {
+	config, err := readJSONConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	servers, _ := config["mcpServers"].(map[string]interface{})
+	if _, ok := servers[name]; !ok {
+		return nil
+	}
+	delete(servers, name)
+	config["mcpServers"] = servers
+
+	return writeJSONConfig(configPath, config)
+}
+
 func readJSONConfig(path string) (map[string]interface{}, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

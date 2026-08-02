@@ -2,6 +2,7 @@ package cli
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/axsmak/aim/internal/adapter"
 	"github.com/axsmak/aim/internal/errs"
+	"github.com/axsmak/aim/internal/loadout"
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/axsmak/aim/internal/mcp"
 	"github.com/axsmak/aim/internal/skill"
@@ -19,6 +21,7 @@ import (
 
 func newApplyCmd() *cobra.Command {
 	var dryRun bool
+	var loadoutName string
 	cmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply local inventory working tree to AI environments without publishing",
@@ -28,10 +31,14 @@ func newApplyCmd() *cobra.Command {
 				errs.Fatalf("cannot determine home directory: %v", err)
 			}
 			workDir := resolveWorkDir(homeDir)
+			if loadoutName != "" {
+				return runApplyLoadout(loadoutName, dryRun, homeDir, workDir, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			}
 			return runApply(dryRun, homeDir, workDir, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be applied without making changes")
+	cmd.Flags().StringVar(&loadoutName, "loadout", "", "apply the named loadout declaratively: environments are reconciled exactly to its set within the AIM-managed namespace")
 	return cmd
 }
 
@@ -107,7 +114,11 @@ type skillDelta struct {
 // The function is called BEFORE installation so that the snapshot reflects
 // the pre-install state. It is reused by both runApply and runApplyDryRun.
 //
-// ADR-0003 5.1: category D (deletion from env) is out of scope.
+// ADR-0003 5.1: category D (deletion from env) stays out of scope HERE — the
+// ordinary apply path is additive (A/M only). ADR-0004 (decision 7) revises
+// that record exclusively for the loadout path: apply --loadout gets D through
+// the reconciliation engine (BuildReconcilePlan in reconcile.go), which shares
+// the sha256 comparison below via skillEnvCategory.
 func computeApplyDelta(validSkills []skill.Skill, adapters []adapter.Adapter, baseDirs []string, dryRun bool) []string {
 	if len(adapters) == 0 {
 		return nil
@@ -121,27 +132,21 @@ func computeApplyDelta(validSkills []skill.Skill, adapters []adapter.Adapter, ba
 		// here. See issue #138 for a planned follow-up.
 		inventoryHash := sha256.Sum256(s.Raw)
 		for i, a := range adapters {
-			installedPath := filepath.Join(baseDirs[i], "skills", s.Name, "SKILL.md")
-			raw, readErr := os.ReadFile(installedPath)
-			if readErr != nil {
-				// File not present in this env.
+			switch skillEnvCategory(baseDirs[i], s.Name, inventoryHash) {
+			case "A":
+				// Skill not present in this env. An entry that already exists
+				// keeps its category (first-seen wins, as before the refactor).
 				d := deltaMap[s.Name]
 				if d == nil {
 					d = &skillDelta{category: "A"}
 					deltaMap[s.Name] = d
 				}
 				d.envNames = append(d.envNames, a.Name())
-				continue
-			}
-			installedHash := sha256.Sum256(raw)
-			if installedHash != inventoryHash {
+			case "M":
 				d := deltaMap[s.Name]
 				if d == nil {
 					d = &skillDelta{category: "M"}
 					deltaMap[s.Name] = d
-				} else if d.category != "A" {
-					// Keep "A" if already set (missing in other envs takes precedence).
-					d.category = "M"
 				}
 				d.envNames = append(d.envNames, a.Name())
 			}
@@ -269,4 +274,115 @@ func runApplyDryRun(skillsDir, mcpDirFull string, cfg localconfig.Config, homeDi
 	}
 
 	return nil
+}
+
+// runApplyLoadout is the loadout path of apply (ADR-0004): every admissible
+// environment is brought exactly to the loadout set within the AIM-managed
+// namespace, via the reconciliation engine in reconcile.go. This is the only
+// apply path where category D (removal from env) exists; plain apply stays
+// additive (ADR-0003 5.1).
+func runApplyLoadout(name string, dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io.Writer) error {
+	cfg, err := localconfig.Load(workDir)
+	if err != nil {
+		return fmt.Errorf("cannot parse aim.local.yaml: %w", err)
+	}
+
+	loadoutsDir := filepath.Join(workDir, "loadouts")
+	lo, valErrs, warns, err := loadout.Resolve(loadoutsDir, name)
+	if err != nil {
+		var nf loadout.NotFoundError
+		if errors.As(err, &nf) {
+			// A missing loadouts/ directory resolves to the same not-found
+			// class: Resolve finds no candidate files there.
+			printAvailableLoadoutsHint(loadoutsDir, errOut)
+			// nf.Error() is `loadout "X" not found in loadouts/`; main
+			// prefixes "error: " and exits 1 (errs.Fatal format, US-L05).
+			return nf
+		}
+		return fmt.Errorf("cannot read loadout %q: %w", name, err)
+	}
+	for _, w := range warns {
+		fmt.Fprintf(errOut, "warning: %s\n", w)
+	}
+	if len(valErrs) > 0 {
+		// Fail fast on the first finding (apply contract, US-L05); push is
+		// the path that reports every finding at once (US-L04).
+		ve := valErrs[0]
+		return fmt.Errorf("loadout %q: %s: %s", name, ve.Field, ve.Message)
+	}
+
+	inv, invWarnings, err := LoadReconcileInventory(filepath.Join(workDir, "skills"), filepath.Join(workDir, "mcp"))
+	if err != nil {
+		return err
+	}
+	for _, w := range invWarnings {
+		fmt.Fprintf(errOut, "warning: %s\n", w)
+	}
+
+	envs := DetectReconcileEnvs(cfg, homeDir)
+	plan, err := BuildReconcilePlan(lo, inv, envs)
+	if err != nil {
+		return err
+	}
+	// Loadout entries without a valid inventory element behind them (deleted,
+	// renamed, or currently invalid) are neither installed nor removed; they
+	// must not be dropped silently.
+	for _, ref := range plan.MissingRefs {
+		fmt.Fprintf(errOut, "warning: loadout %q: no valid inventory item for %s (skipped)\n", lo.Name, ref)
+	}
+
+	if dryRun {
+		printLoadoutDryRun(lo, plan, out)
+		return nil
+	}
+
+	res, execErr := ExecuteReconcilePlan(plan, &cfg, in, out, errOut)
+	// Save resolved MCP env values, mirroring runApply.
+	// IMPORTANT: synced_hash and published_hash are never touched here.
+	if err := localconfig.Save(workDir, cfg); err != nil {
+		fmt.Fprintf(errOut, "warning: cannot save mcp_env: %v\n", err)
+	}
+	if execErr != nil {
+		return execErr
+	}
+
+	// Success line counters = operation volume; composition lives in the
+	// delta block (ADR-0003 5.2). An empty plan prints the line alone.
+	verb := fmt.Sprintf("applied loadout %q", lo.Name)
+	fmt.Fprintln(out, FormatSuccess(verb, "", res.SkillCount, res.MCPCount, res.EnvCount, res.MCPEnvNames))
+	PrintDeltaBlock(out, res.DeltaLines)
+	return nil
+}
+
+// printLoadoutDryRun renders the full A/M/D plan without touching anything:
+// building the plan performed no writes, and the caller saves no config on
+// this path (ADR-0004 decision 8 — dry-run instead of interactive prompts).
+func printLoadoutDryRun(lo loadout.Loadout, plan *ReconcilePlan, out io.Writer) {
+	if plan.Empty() {
+		fmt.Fprintf(out, "[dry-run] nothing to apply — environments match loadout %q\n", lo.Name)
+		return
+	}
+	envNames := plan.EnvNames()
+	fmt.Fprintf(out, "[dry-run] would apply loadout %q — %s to %s (%s):\n",
+		lo.Name,
+		Plural(len(plan.Actions), "change"),
+		Plural(len(envNames), "environment"),
+		strings.Join(envNames, ", "),
+	)
+	PrintDeltaBlock(out, plan.DeltaLines(true))
+}
+
+// printAvailableLoadoutsHint lists the valid loadouts when there are five or
+// fewer (US-L05). With none — e.g. loadouts/ missing or empty — there is
+// nothing useful to suggest, so no hint is printed.
+func printAvailableLoadoutsHint(loadoutsDir string, errOut io.Writer) {
+	valid, _, _, err := loadout.List(loadoutsDir)
+	if err != nil || len(valid) == 0 || len(valid) > 5 {
+		return
+	}
+	names := make([]string, 0, len(valid))
+	for _, l := range valid {
+		names = append(names, l.Name)
+	}
+	fmt.Fprintf(errOut, "hint: available loadouts: %s\n", strings.Join(names, ", "))
 }
