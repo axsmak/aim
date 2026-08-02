@@ -9,7 +9,7 @@ import (
 )
 
 // ManagedPaths are the AIM-owned paths in the inventory repo checked for dirty state.
-var ManagedPaths = []string{"aim.yaml", ".gitignore", "skills/", "mcp/"}
+var ManagedPaths = []string{"aim.yaml", ".gitignore", "skills/", "mcp/", "loadouts/"}
 
 // Ops defines git operations used by aiman commands.
 type Ops interface {
@@ -139,10 +139,13 @@ func (e *ExecOps) Commit(dir, msg string) error {
 	if _, err := run(dir, "add", "skills/"); err != nil {
 		return err
 	}
-	// Stage mcp/ only if the directory exists
-	if info, statErr := os.Stat(filepath.Join(dir, "mcp")); statErr == nil && info.IsDir() {
-		if _, err := run(dir, "add", "mcp/"); err != nil {
-			return err
+	// Stage mcp/ and loadouts/ only if the directory exists — a repository
+	// created before loadouts (v0.8.0) has no loadouts/ at all.
+	for _, d := range []string{"mcp", "loadouts"} {
+		if info, statErr := os.Stat(filepath.Join(dir, d)); statErr == nil && info.IsDir() {
+			if _, err := run(dir, "add", d+"/"); err != nil {
+				return err
+			}
 		}
 	}
 	cmd := exec.Command("git", "commit", "-m", msg)
@@ -283,13 +286,13 @@ func (e *ExecOps) ListUntrackedInPaths(dir string, paths []string) ([]string, er
 	return result, nil
 }
 
-// ManagedStatus returns git status --porcelain lines for managed paths.
-// Returns nil, nil when the working tree is clean for those paths.
+// ManagedStatus returns "<marker> <path>" lines for managed paths, in the same
+// A/M/D form as DiffSyncDelta (ADR-0003 5.1). Returns nil, nil when the working
+// tree is clean for those paths.
 func ManagedStatus(workDir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", workDir,
-		"status", "--porcelain", "--untracked-files=all",
-		"--", "aim.yaml", ".gitignore", "skills/", "mcp/")
-	out, err := cmd.Output()
+	args := append([]string{"-C", workDir,
+		"status", "--porcelain", "--untracked-files=all", "--"}, ManagedPaths...)
+	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("git status failed: %w", err)
 	}
@@ -297,7 +300,37 @@ func ManagedStatus(workDir string) ([]string, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	return strings.Split(raw, "\n"), nil
+	split := strings.Split(raw, "\n")
+	lines := make([]string, 0, len(split))
+	for _, line := range split {
+		if formatted := formatPorcelainLine(line); formatted != "" {
+			lines = append(lines, formatted)
+		}
+	}
+	return lines, nil
+}
+
+// formatPorcelainLine converts one `git status --porcelain` record into the
+// "<marker> <path>" form. Porcelain reports the index and worktree state in two
+// columns; the delta block describes the net effect on the published tree, so a
+// letter in either column decides the marker.
+func formatPorcelainLine(line string) string {
+	if len(line) < 4 {
+		return ""
+	}
+	code, path := line[:2], strings.TrimSpace(line[3:])
+	var marker string
+	switch {
+	case code == "??", strings.ContainsRune(code, 'A'):
+		marker = "A"
+	case strings.ContainsRune(code, 'D'):
+		marker = "D"
+	case strings.ContainsRune(code, 'R'):
+		marker = "R"
+	default:
+		marker = "M"
+	}
+	return marker + " " + path
 }
 
 func (e *ExecOps) CountAheadBehind(dir, base, ref string) (ahead, behind int, err error) {
@@ -320,7 +353,7 @@ func (e *ExecOps) CountAheadBehind(dir, base, ref string) (ahead, behind int, er
 
 // syncDeltaPaths are the paths used by both DiffSyncDelta and CleanUntracked.
 // ADR-0003 5.3 (Н-5): single constant — report and clean always use identical paths.
-var syncDeltaPaths = []string{"skills/", "mcp/"}
+var syncDeltaPaths = []string{"skills/", "mcp/", "loadouts/"}
 
 // DiffSyncDelta returns formatted "X path" lines for skills/ and mcp/ between HEAD and
 // origin/main. Must be called before ResetHard — the diff is gone after reset.

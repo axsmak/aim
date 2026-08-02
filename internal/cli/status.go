@@ -15,7 +15,7 @@ import (
 
 const fetchTimeout = 5 * time.Second
 
-var statusManagedPaths = []string{"skills/", "mcp/"}
+var statusManagedPaths = []string{"skills/", "mcp/", "loadouts/"}
 
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{

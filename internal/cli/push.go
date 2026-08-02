@@ -140,9 +140,9 @@ func runPush(dryRun bool, workDir string, git gitops.Ops, out, errOut io.Writer)
 			fmt.Fprintln(out, "[dry-run] would publish managed changes:")
 			PrintDeltaBlock(out, lines)
 		}
-		invLine := fmt.Sprintf("  validated inventory: %d skills", len(valid))
+		invLine := "  validated inventory: " + Plural(len(valid), "skill")
 		if len(mcpItems) > 0 {
-			invLine += fmt.Sprintf(", %d MCP servers", len(mcpItems))
+			invLine += ", " + Plural(len(mcpItems), "MCP server")
 		}
 		fmt.Fprintln(out, invLine)
 		return nil

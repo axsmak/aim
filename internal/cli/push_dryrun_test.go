@@ -64,11 +64,8 @@ func TestPushDryRun_untrackedSkill(t *testing.T) {
 	if !strings.Contains(output, "[dry-run] would publish managed changes") {
 		t.Errorf("expected publish-intent header, got: %q", output)
 	}
-	if !strings.Contains(output, "skills/wiki.md") {
-		t.Errorf("expected skills/wiki.md in porcelain output, got: %q", output)
-	}
-	if !strings.Contains(output, "??") {
-		t.Errorf("expected untracked marker '??' in output, got: %q", output)
+	if !strings.Contains(output, "A skills/wiki.md") {
+		t.Errorf("expected untracked skill as 'A skills/wiki.md', got: %q", output)
 	}
 	if !strings.Contains(output, "validated inventory:") {
 		t.Errorf("expected inventory summary, got: %q", output)

@@ -39,7 +39,7 @@ func newSyncCmd() *cobra.Command {
 
 // syncCleanPaths are the paths used for both git clean and the --force report.
 // ADR-0003 5.3 (Н-5): single constant — report and clean always use identical paths.
-var syncCleanPaths = []string{"skills/", "mcp/"}
+var syncCleanPaths = []string{"skills/", "mcp/", "loadouts/"}
 
 func runSync(dryRun, force bool, homeDir, skillsDir, mcpDir, workDir string, in io.Reader, out, errOut io.Writer) error {
 	if _, err := os.Stat(filepath.Join(workDir, ".git")); err == nil {

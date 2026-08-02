@@ -201,7 +201,7 @@ aiman apply --loadout documentation-work
 
 Plain `aiman apply` and `aiman sync` stay additive and apply the whole
 inventory. `aiman push` validates `loadouts/` (format and reference integrity)
-before publishing.
+and publishes it alongside `skills/` and `mcp/`.
 
 ## Commands
 

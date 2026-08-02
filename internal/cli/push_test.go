@@ -254,8 +254,8 @@ func TestRunPush_dryRun_withMCP(t *testing.T) {
 	if !strings.Contains(output, "[dry-run]") {
 		t.Errorf("expected dry-run in output, got: %q", output)
 	}
-	if !strings.Contains(output, "MCP servers") {
-		t.Errorf("expected 'MCP servers' in output, got: %q", output)
+	if !strings.Contains(output, "1 MCP server") {
+		t.Errorf("expected singular '1 MCP server' in output, got: %q", output)
 	}
 }
 

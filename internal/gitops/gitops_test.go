@@ -534,6 +534,55 @@ func TestCommit_SkipsAbsentConfigFiles(t *testing.T) {
 	}
 }
 
+// TestCommit_StagesLoadoutsOnly verifies a loadout is published even when it is
+// the only change — push used to validate loadouts/ without ever staging it.
+func TestCommit_StagesLoadoutsOnly(t *testing.T) {
+	bareDir, workDir := setupRepo(t)
+	initialCommit(t, workDir, bareDir)
+
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	loadoutsDir := filepath.Join(workDir, "loadouts")
+	if err := os.MkdirAll(loadoutsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := "name: Docs\nitems:\n  - skill:wiki\n"
+	if err := os.WriteFile(filepath.Join(loadoutsDir, "docs.yaml"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ops := gitops.New()
+	if err := ops.Commit(workDir, "aim: publish loadout"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	files := runGit(t, workDir, "show", "HEAD", "--name-only", "--format=")
+	if !strings.Contains(files, "loadouts/docs.yaml") {
+		t.Errorf("loadouts/docs.yaml not in commit; committed files: %q", files)
+	}
+}
+
+// TestCommit_SkipsAbsentLoadouts verifies Commit still works in a repository
+// created before v0.8.0, which has no loadouts/ directory at all.
+func TestCommit_SkipsAbsentLoadouts(t *testing.T) {
+	bareDir, workDir := setupRepo(t)
+	initialCommit(t, workDir, bareDir)
+
+	skillsDir := filepath.Join(workDir, "skills")
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "skill.md"), []byte("---\nname: x\ndescription: y\n---\nbody"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ops := gitops.New()
+	if err := ops.Commit(workDir, "aim: publish without loadouts"); err != nil {
+		t.Fatalf("Commit should succeed without loadouts/: %v", err)
+	}
+}
+
 func setupLocalRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -763,16 +812,41 @@ func TestManagedStatus_untrackedSkill(t *testing.T) {
 		t.Fatalf("ManagedStatus: %v", err)
 	}
 	if len(lines) == 0 {
-		t.Fatal("expected porcelain lines for untracked file, got none")
+		t.Fatal("expected delta lines for untracked file, got none")
 	}
 	found := false
 	for _, l := range lines {
-		if strings.HasPrefix(l, "??") && strings.Contains(l, "skills/wiki.md") {
+		if l == "A skills/wiki.md" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected '?? skills/wiki.md' in output, got %v", lines)
+		t.Fatalf("expected 'A skills/wiki.md' in output, got %v", lines)
+	}
+}
+
+func TestManagedStatus_includesLoadouts(t *testing.T) {
+	dir := setupLocalRepo(t)
+	if err := os.MkdirAll(filepath.Join(dir, "loadouts"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := "name: Docs\nitems:\n  - skill:wiki\n"
+	if err := os.WriteFile(filepath.Join(dir, "loadouts", "docs.yaml"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	lines, err := gitops.ManagedStatus(dir)
+	if err != nil {
+		t.Fatalf("ManagedStatus: %v", err)
+	}
+	found := false
+	for _, l := range lines {
+		if l == "A loadouts/docs.yaml" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected 'A loadouts/docs.yaml' in output, got %v", lines)
 	}
 }
 
@@ -802,13 +876,12 @@ func TestManagedStatus_modifiedTracked(t *testing.T) {
 	}
 	found := false
 	for _, l := range lines {
-		// worktree-modified shows as " M" (space + M)
-		if strings.Contains(l, "skills/a.md") {
+		if l == "M skills/a.md" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected skills/a.md in porcelain output, got %v", lines)
+		t.Fatalf("expected 'M skills/a.md' in output, got %v", lines)
 	}
 }
 
