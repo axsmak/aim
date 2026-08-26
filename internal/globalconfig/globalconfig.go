@@ -10,7 +10,8 @@ import (
 
 // Config holds the global AIM configuration.
 type Config struct {
-	Repo string `yaml:"repo"`
+	Repo    string `yaml:"repo"`
+	Loadout string `yaml:"loadout,omitempty"`
 }
 
 // Path returns the XDG-compliant path to the global config file.
