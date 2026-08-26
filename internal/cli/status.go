@@ -9,6 +9,7 @@ import (
 
 	"github.com/axsmak/aim/internal/errs"
 	"github.com/axsmak/aim/internal/gitops"
+	"github.com/axsmak/aim/internal/globalconfig"
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/spf13/cobra"
 )
@@ -26,12 +27,12 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				errs.Fatalf("cannot determine home directory: %v", err)
 			}
-			return runStatus(resolveWorkDir(homeDir), gitops.New(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return runStatus(homeDir, resolveWorkDir(homeDir), gitops.New(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 }
 
-func runStatus(workDir string, git gitops.Ops, out, errOut io.Writer) error {
+func runStatus(homeDir, workDir string, git gitops.Ops, out, errOut io.Writer) error {
 	cfg, err := localconfig.Load(workDir)
 	if err != nil {
 		errs.Fatal(err.Error())
@@ -50,10 +51,12 @@ func runStatus(workDir string, git gitops.Ops, out, errOut io.Writer) error {
 
 	posText, ahead, behind, unreachable := statusPosition(workDir, git, remoteUnreachable, errOut)
 	envText, needsSync := statusEnvStatus(workDir, git, cfg, headHash)
+	pinText := statusPinText(homeDir)
 
 	fmt.Fprintf(out, "Repository:   %s\n", cfg.Repo)
 	fmt.Fprintf(out, "Position:     %s\n", posText)
 	fmt.Fprintf(out, "Environments: %s\n", envText)
+	fmt.Fprintf(out, "Pinned loadout: %s\n", pinText)
 
 	delta := statusDelta(workDir, git)
 	hasDelta := len(delta) > 0
@@ -181,6 +184,17 @@ func statusDelta(workDir string, git gitops.Ops) []string {
 		delta = append(delta, fmt.Sprintf("  A %s", f))
 	}
 	return delta
+}
+
+// statusPinText reports the active pinned loadout name, or "none" when no
+// pin is set. The pin is local state read from the global config — it does
+// not depend on remote reachability, and a read error must not fail status.
+func statusPinText(homeDir string) string {
+	gcfg, err := globalconfig.Load(homeDir)
+	if err != nil || gcfg.Loadout == "" {
+		return "none"
+	}
+	return gcfg.Loadout
 }
 
 func shortHash(h string) string {
