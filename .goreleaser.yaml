@@ -76,7 +76,7 @@ nfpms:
     maintainer: Alexey Babiev <mak.axs@gmail.com>
     description: Agent Inventory Manager — manage AI agent skills and MCP servers across Claude Code, Cursor, Codex
     license: Apache-2.0
-    formats: [deb]
+    formats: [deb, rpm]
     bindir: /usr/bin
     section: utils
     priority: optional
