@@ -11,6 +11,7 @@ import (
 	"github.com/axsmak/aim/internal/adapter"
 	"github.com/axsmak/aim/internal/errs"
 	"github.com/axsmak/aim/internal/gitops"
+	"github.com/axsmak/aim/internal/globalconfig"
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/axsmak/aim/internal/mcp"
 	"github.com/axsmak/aim/internal/skill"
@@ -53,6 +54,10 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, git gitops.
 	if err != nil {
 		return fmt.Errorf("cannot parse aim.local.yaml: %w", err)
 	}
+	// ADR-0006: read-only, no side effects — resolving/validating the pin
+	// itself happens later, after fetch (and after ResetHard for a real run),
+	// never before (see materializeSync doc comment).
+	gcfg, _ := globalconfig.Load(homeDir)
 
 	dirtyTracked, err := git.HasDirtyWorktree(workDir)
 	if err != nil {
@@ -140,18 +145,30 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, git gitops.
 	if dryRun {
 		if headHash == originHash {
 			fmt.Fprintln(out, "[dry-run] nothing to sync — environments up to date with origin/main")
+		} else {
+			// ADR-0003 5.6 / 4.1: dry-run shows delta HEAD→origin/main, not full inventory.
+			deltaLines, deltaErr := git.DiffSyncDelta(workDir)
+			if deltaErr != nil {
+				return fmt.Errorf("cannot compute sync delta: %w", deltaErr)
+			}
+			envs := countEnvs(homeDir, cfg)
+			fmt.Fprintf(out, "[dry-run] would sync %s from origin/main → %s:\n",
+				Plural(len(deltaLines), "change"),
+				Plural(envs, "environment"))
+			PrintDeltaBlock(out, deltaLines)
+		}
+		if gcfg.Loadout == "" {
 			return nil
 		}
-		// ADR-0003 5.6 / 4.1: dry-run shows delta HEAD→origin/main, not full inventory.
-		deltaLines, deltaErr := git.DiffSyncDelta(workDir)
-		if deltaErr != nil {
-			return fmt.Errorf("cannot compute sync delta: %w", deltaErr)
+		// ADR-0006 decision 5: pinned dry-run additionally shows the A/M/D
+		// application plan — a second, separate block from the git transport
+		// delta above. Computed from the inventory as it sits on disk right
+		// now (dry-run never resets), against the current fetch state.
+		res, err := materializeSync(true, gcfg, &cfg, homeDir, skillsDir, mcpDirFull, filepath.Join(workDir, "loadouts"), nil, in, out, errOut)
+		if err != nil {
+			return err
 		}
-		envs := countEnvs(homeDir, cfg)
-		fmt.Fprintf(out, "[dry-run] would sync %s from origin/main → %s:\n",
-			Plural(len(deltaLines), "change"),
-			Plural(envs, "environment"))
-		PrintDeltaBlock(out, deltaLines)
+		printPinnedDryRunPlan(res, out)
 		return nil
 	}
 
@@ -170,19 +187,17 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, git gitops.
 		}
 	}
 
-	skillCount, envCount, installErr := installSkills(skillsDir, cfg, homeDir, out, errOut)
-
-	mcpCount, mcpEnvNames, mcpErr := installMCPs(mcpDirFull, &cfg, homeDir, in, out, errOut)
+	// ADR-0006: the pin is validated here, after ResetHard already ran, so a
+	// loadout deleted/renamed in this very remote update is correctly seen as
+	// missing rather than resolved against stale pre-reset state.
+	res, materializeErr := materializeSync(false, gcfg, &cfg, homeDir, skillsDir, mcpDirFull, filepath.Join(workDir, "loadouts"), nil, in, out, errOut)
 
 	hash, err := git.HeadHash(workDir)
 	if err != nil {
 		return fmt.Errorf("cannot get HEAD hash: %w", err)
 	}
 
-	combinedErr := installErr
-	if combinedErr == nil {
-		combinedErr = mcpErr
-	}
+	combinedErr := materializeErr
 
 	if combinedErr == nil {
 		// synced_hash is written only after ResetHard succeeds, so it reliably
@@ -208,10 +223,17 @@ func runGitSync(dryRun, force bool, homeDir, mcpDir, workDir string, git gitops.
 		PrintDeltaBlock(out, forceDiscarded)
 	}
 
-	fmt.Fprintln(out, FormatSuccess("synced", shortHash, skillCount, mcpCount, envCount, mcpEnvNames))
+	fmt.Fprintln(out, FormatSuccess("synced", shortHash, res.SkillCount, res.MCPCount, res.EnvCount, res.MCPEnvNames))
 
 	// ADR-0003 5.1: print delta block after success line (empty = no block).
 	PrintDeltaBlock(out, syncDeltaLines)
+
+	// ADR-0006 decision 5: pinned mode's D-report is a second, separate block
+	// — the plan's own composition (application), never conflated with the
+	// git transport delta printed above.
+	if res.Pinned {
+		PrintDeltaBlock(out, res.DeltaLines)
+	}
 
 	return nil
 }
@@ -227,6 +249,15 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 			fmt.Fprintln(errOut, "warning: aim.local.yaml is not in .gitignore — local config may be committed accidentally")
 		}
 	}
+
+	// ADR-0006: read-only, no side effects.
+	gcfg, _ := globalconfig.Load(homeDir)
+
+	if gcfg.Loadout != "" {
+		return runLocalSyncPinned(dryRun, gcfg, cfg, homeDir, workDir, in, out, errOut)
+	}
+
+	// --- no pin: byte-for-byte the pre-ADR-0006 additive behavior ---
 
 	valid, invalid, err := skill.ReadAll(skillsDir)
 	if err != nil {
@@ -258,57 +289,20 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 		return nil
 	}
 
-	cfgChanged := false
-	installedEnvCount := 0
-	var mcpEnvNames []string
-
-	for _, a := range adapter.DefaultAdapters(cfg) {
-		baseDir, found := a.Detect(homeDir)
-		if !found {
-			fmt.Fprintf(errOut, "warning: %s not found\n", a.Name())
-			continue
-		}
-
-		for _, s := range valid {
-			if err := a.InstallSkill(s, baseDir); err != nil {
-				return fmt.Errorf("failed to install %s in %s: %w", s.Name, a.Name(), err)
-			}
-		}
-
-		mcpInstalledHere := 0
-		for _, item := range mcpItems {
-			if !containsTarget(item.Targets, a.Name()) {
-				continue
-			}
-			existing := cfg.GetMCPEnvForServer(item.Name)
-			resolved, changed, err := mcp.ResolveEnv(item, existing, in, out)
-			if err != nil {
-				fmt.Fprintf(errOut, "warning: env resolution for %s: %v\n", item.Name, err)
-			}
-			if changed {
-				for k, v := range resolved {
-					cfg.SetMCPEnv(item.Name, k, v)
-				}
-				cfgChanged = true
-			}
-			if err := a.InstallMCP(item, baseDir, resolved); err != nil {
-				fmt.Fprintf(errOut, "warning: failed to install MCP %s in %s: %v\n", item.Name, a.Name(), err)
-				continue
-			}
-			mcpInstalledHere++
-		}
-		if mcpInstalledHere > 0 {
-			mcpEnvNames = append(mcpEnvNames, a.Name())
-		}
-		installedEnvCount++
+	// Reuse the skills/mcp already parsed above instead of having
+	// materializeSync re-read the directory and re-print every warning.
+	preRead := &inventoryPreRead{skills: valid, mcps: mcpItems}
+	res, err := materializeSync(false, gcfg, &cfg, homeDir, skillsDir, mcpDir, "", preRead, in, out, errOut)
+	if err != nil {
+		return err
 	}
 
-	if installedEnvCount > 0 {
+	if res.EnvCount > 0 {
 		// ADR-0003 5.6 / 4.2: local-mode uses "synced:" not "applied:".
-		fmt.Fprintln(out, FormatSuccess("synced", "", len(valid), len(mcpItems), installedEnvCount, mcpEnvNames))
+		fmt.Fprintln(out, FormatSuccess("synced", "", res.SkillCount, res.MCPCount, res.EnvCount, res.MCPEnvNames))
 	}
 
-	if cfgChanged {
+	if res.CfgChanged {
 		if err := localconfig.Save(workDir, cfg); err != nil {
 			fmt.Fprintf(errOut, "warning: cannot save mcp_env: %v\n", err)
 		}
@@ -317,7 +311,45 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 	return nil
 }
 
-// installSkills installs all valid skills into all detected AI environments.
+// runLocalSyncPinned is the pin path of local-mode sync (ADR-0006). Local
+// mode has no fetch/reset step, so "the pin is validated after the inventory
+// update" collapses to "validated against whatever is on disk right now" —
+// there is no earlier state to race against.
+func runLocalSyncPinned(dryRun bool, gcfg globalconfig.Config, cfg localconfig.Config, homeDir, workDir string, in io.Reader, out, errOut io.Writer) error {
+	skillsDirFull := filepath.Join(workDir, "skills")
+	mcpDirFull := filepath.Join(workDir, "mcp")
+	loadoutsDir := filepath.Join(workDir, "loadouts")
+
+	res, err := materializeSync(dryRun, gcfg, &cfg, homeDir, skillsDirFull, mcpDirFull, loadoutsDir, nil, in, out, errOut)
+	if err != nil {
+		// Nothing has been written to environments or aim.local.yaml at this
+		// point: a failed resolve/build returns before ExecuteReconcilePlan,
+		// and an ExecuteReconcilePlan error is returned here before any Save
+		// below — sync's partial-failure state is never persisted silently.
+		return err
+	}
+
+	if dryRun {
+		printPinnedDryRunPlan(res, out)
+		return nil
+	}
+
+	// Success line = operation volume; delta block = composition (ADR-0003
+	// 5.2). An empty plan still prints the line alone, mirroring
+	// runApplyLoadout.
+	fmt.Fprintln(out, FormatSuccess("synced", "", res.SkillCount, res.MCPCount, res.EnvCount, res.MCPEnvNames))
+	PrintDeltaBlock(out, res.DeltaLines)
+
+	// Persist resolved MCP env values, mirroring runApplyLoadout — only
+	// reached on success (see the err != nil guard above).
+	if err := localconfig.Save(workDir, cfg); err != nil {
+		fmt.Fprintf(errOut, "warning: cannot save mcp_env: %v\n", err)
+	}
+	return nil
+}
+
+// installSkills reads skillsDir and installs every valid skill into every
+// detected AI environment.
 func installSkills(skillsDir string, cfg localconfig.Config, homeDir string, out, errOut io.Writer) (skillCount, envCount int, err error) {
 	valid, invalid, readErr := skill.ReadAll(skillsDir)
 	if readErr != nil {
@@ -326,7 +358,16 @@ func installSkills(skillsDir string, cfg localconfig.Config, homeDir string, out
 	for _, ve := range invalid {
 		fmt.Fprintf(errOut, "warning: %s\n", ve)
 	}
+	return installSkillsInto(valid, cfg, homeDir, errOut)
+}
 
+// installSkillsInto installs an already-parsed skill list into every detected
+// AI environment. Factored out of installSkills (ADR-0006) so a caller that
+// already holds a parsed inventory — runLocalSync's pre-read for the
+// "nothing to sync" gate — can install from it directly, instead of
+// materializeSync re-reading skillsDir and re-printing every "invalid skill"
+// warning a second time.
+func installSkillsInto(valid []skill.Skill, cfg localconfig.Config, homeDir string, errOut io.Writer) (skillCount, envCount int, err error) {
 	for _, a := range adapter.DefaultAdapters(cfg) {
 		baseDir, found := a.Detect(homeDir)
 		if !found {
@@ -343,16 +384,27 @@ func installSkills(skillsDir string, cfg localconfig.Config, homeDir string, out
 	return len(valid), envCount, nil
 }
 
-// installMCPs reads mcp/ directory and applies each MCP item to all matching adapters.
-// Returns MCP item count, the names of environments actually installed into, and a
-// non-nil error if any install failed. synced_hash must not be updated on error.
+// installMCPs reads mcpDir and applies each MCP item to all matching
+// adapters. Returns MCP item count, the names of environments actually
+// installed into, and a non-nil error if any install failed. synced_hash must
+// not be updated on error. Signature predates ADR-0006 and is kept as-is:
+// runApply (apply.go) calls it directly and does not need the cfgChanged
+// value installMCPsInto also tracks (see materializeAdditive, which calls
+// installMCPsInto directly to get it).
 func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.Reader, out, errOut io.Writer) (mcpCount int, envNames []string, err error) {
 	items, parseErrs := mcp.ParseDir(mcpDir)
 	for _, e := range parseErrs {
 		fmt.Fprintf(errOut, "warning: %v\n", e)
 	}
+	mcpCount, envNames, _, err = installMCPsInto(items, cfg, homeDir, in, out, errOut)
+	return mcpCount, envNames, err
+}
+
+// installMCPsInto installs an already-parsed MCP item list, mirroring
+// installSkillsInto's split from installSkills for the same reason (ADR-0006).
+func installMCPsInto(items []mcp.MCP, cfg *localconfig.Config, homeDir string, in io.Reader, out, errOut io.Writer) (mcpCount int, envNames []string, cfgChanged bool, err error) {
 	if len(items) == 0 {
-		return 0, nil, nil
+		return 0, nil, false, nil
 	}
 	mcpCount = len(items)
 
@@ -376,6 +428,7 @@ func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.R
 				for k, v := range resolved {
 					cfg.SetMCPEnv(item.Name, k, v)
 				}
+				cfgChanged = true
 			}
 			if installErr := a.InstallMCP(item, baseDir, resolved); installErr != nil {
 				fmt.Fprintf(errOut, "warning: failed to install MCP %s in %s: %v\n", item.Name, a.Name(), installErr)
@@ -389,9 +442,9 @@ func installMCPs(mcpDir string, cfg *localconfig.Config, homeDir string, in io.R
 		}
 	}
 	if hadInstallError {
-		return mcpCount, envNames, fmt.Errorf("one or more MCP servers failed to install; synced_hash not updated")
+		return mcpCount, envNames, cfgChanged, fmt.Errorf("one or more MCP servers failed to install; synced_hash not updated")
 	}
-	return mcpCount, envNames, nil
+	return mcpCount, envNames, cfgChanged, nil
 }
 
 func mcpEnvStatus(m mcp.MCP, cfg localconfig.Config) string {

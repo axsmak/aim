@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/axsmak/aim/internal/globalconfig"
 )
 
 func TestRunStatus_NotInitialized(t *testing.T) {
 	dir := t.TempDir()
 	var out, errOut bytes.Buffer
-	err := runStatus(dir, &fakeGitOps{}, &out, &errOut)
+	err := runStatus(t.TempDir(), dir, &fakeGitOps{}, &out, &errOut)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -30,7 +32,7 @@ func TestRunStatus_NoDelta(t *testing.T) {
 		listUntrackedResult:  nil,
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out.String()
@@ -54,7 +56,7 @@ func TestRunStatus_WithDelta(t *testing.T) {
 		listUntrackedResult: nil,
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out.String()
@@ -73,7 +75,7 @@ func TestRunStatus_WithUntracked(t *testing.T) {
 		listUntrackedResult:  []string{"skills/new-skill.md"},
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out.String()
@@ -96,7 +98,7 @@ func TestRunStatus_DeltaTruncated(t *testing.T) {
 		listUntrackedResult:  nil,
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := out.String()
@@ -117,7 +119,7 @@ func TestRunStatus_Position_Ahead(t *testing.T) {
 		return 3, 0, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// 4.8 plural, 4.9 text format
@@ -133,7 +135,7 @@ func TestRunStatus_Position_AheadSingular(t *testing.T) {
 		return 1, 0, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, out.String(), "Position:     1 commit ahead of origin/main")
@@ -148,7 +150,7 @@ func TestRunStatus_Position_Behind(t *testing.T) {
 		return 0, 2, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// 4.9 text format
@@ -164,7 +166,7 @@ func TestRunStatus_Position_Behind_Hint(t *testing.T) {
 		return 0, 1, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// ADR-0003 4.10: behind → sync hint naming the remote cause.
@@ -182,7 +184,7 @@ func TestRunStatus_Position_Diverged_Hint(t *testing.T) {
 		return 1, 1, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// ADR-0003 4.10: diverged → resolve-with-git hint, distinct from plain behind.
@@ -199,7 +201,7 @@ func TestRunStatus_NeedsSync_Hint(t *testing.T) {
 		return 0, 0, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// ADR-0003 4.10: position up-to-date but environments stale → generic sync hint.
@@ -223,7 +225,7 @@ func TestRunStatus_PushAndSyncHints_BothPrinted(t *testing.T) {
 		return 0, 0, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// ADR-0003 4.10: both unpublished changes and stale environments → both hints,
@@ -248,7 +250,7 @@ func TestRunStatus_Position_Diverged(t *testing.T) {
 		return 1, 1, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// 4.9 diverged format
@@ -264,7 +266,7 @@ func TestRunStatus_Position_Diverged_Plural(t *testing.T) {
 		return 2, 3, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, out.String(), "Position:     diverged from origin/main (2 commits ahead, 3 commits behind)")
@@ -278,7 +280,7 @@ func TestRunStatus_Position_Unreachable_FetchFail(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	// exit 0: runStatus must not return error
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("expected exit 0, got error: %v", err)
 	}
 	// 4.9 / 5.4: Position text
@@ -299,7 +301,7 @@ func TestRunStatus_Unreachable_NoSyncHint_EvenWithNeedsSync(t *testing.T) {
 		return 1, 0, nil // needsSync from synced_hash vs HEAD, no remote call
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("expected exit 0, got error: %v", err)
 	}
 	got := out.String()
@@ -318,7 +320,7 @@ func TestRunStatus_Position_Unreachable_CountAheadBehindFail(t *testing.T) {
 		return 0, 0, &fakeErr{"remote unreachable"}
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, out.String(), "Position:     unknown (remote unreachable)")
@@ -335,7 +337,7 @@ func TestRunStatus_FetchOK_PositionCalculated(t *testing.T) {
 		return 0, 1, nil // remote has 1 new commit
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Position reflects remote state after successful fetch
@@ -350,7 +352,7 @@ func TestRunStatus_Environments_Applied(t *testing.T) {
 	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "abc1234567890abcdef")
 	git := &fakeGitOps{headHashResult: "abc1234567890abcdef"}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, out.String(), "Environments: applied (synced abc1234)")
@@ -366,7 +368,7 @@ func TestRunStatus_Environments_NeedsSync(t *testing.T) {
 		return 0, 0, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// 4.8: plural helper in env status
@@ -383,7 +385,7 @@ func TestRunStatus_Environments_NeedsSync_Singular(t *testing.T) {
 		return 0, 0, nil
 	}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, out.String(), "Environments: needs sync (1 commit not applied)")
@@ -393,10 +395,75 @@ func TestRunStatus_Environments_Unknown(t *testing.T) {
 	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
 	git := &fakeGitOps{headHashResult: "abc1234567890"}
 	var out, errOut bytes.Buffer
-	if err := runStatus(dir, git, &out, &errOut); err != nil {
+	if err := runStatus(t.TempDir(), dir, git, &out, &errOut); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertContains(t, out.String(), "Environments: unknown")
+}
+
+func TestRunStatus_Pin_None(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
+	homeDir := t.TempDir()
+	git := &fakeGitOps{headHashResult: "abc1234567890"}
+	var out, errOut bytes.Buffer
+	if err := runStatus(homeDir, dir, git, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, out.String(), "Pinned loadout: none")
+}
+
+func TestRunStatus_Pin_Set(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
+	homeDir := t.TempDir()
+	if err := globalconfig.Save(homeDir, globalconfig.Config{Repo: dir, Loadout: "backend"}); err != nil {
+		t.Fatalf("failed to save global config: %v", err)
+	}
+	git := &fakeGitOps{headHashResult: "abc1234567890"}
+	var out, errOut bytes.Buffer
+	if err := runStatus(homeDir, dir, git, &out, &errOut); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertContains(t, out.String(), "Pinned loadout: backend")
+}
+
+func TestRunStatus_Pin_PrintedEvenWhenRemoteUnreachable(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
+	homeDir := t.TempDir()
+	if err := globalconfig.Save(homeDir, globalconfig.Config{Repo: dir, Loadout: "backend"}); err != nil {
+		t.Fatalf("failed to save global config: %v", err)
+	}
+	git := &fakeGitOps{
+		headHashResult: "abc1234567890",
+		fetchErr:       errors.New("connection refused"),
+	}
+	var out, errOut bytes.Buffer
+	if err := runStatus(homeDir, dir, git, &out, &errOut); err != nil {
+		t.Fatalf("expected exit 0, got error: %v", err)
+	}
+	// The pin is local state, unrelated to remote reachability: it must still
+	// print alongside the warning, per ADR-0006.
+	assertContains(t, out.String(), "Position:     unknown (remote unreachable)")
+	assertContains(t, out.String(), "Pinned loadout: backend")
+}
+
+func TestRunStatus_Pin_GlobalConfigLoadErrorDoesNotFailStatus(t *testing.T) {
+	dir := writeStatusConfig(t, "git@gitlab.com:test/repo.git", "")
+	homeDir := t.TempDir()
+	// A directory where the global config file should be makes globalconfig.Load
+	// fail (it's not "file does not exist"), but status must degrade gracefully.
+	configDir := filepath.Join(homeDir, ".config", "aim")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(configDir, "config.yaml"), 0755); err != nil {
+		t.Fatalf("failed to create config.yaml as a directory: %v", err)
+	}
+	git := &fakeGitOps{headHashResult: "abc1234567890"}
+	var out, errOut bytes.Buffer
+	if err := runStatus(homeDir, dir, git, &out, &errOut); err != nil {
+		t.Fatalf("expected status to succeed despite global config load error, got: %v", err)
+	}
+	assertContains(t, out.String(), "Pinned loadout: none")
 }
 
 // helpers

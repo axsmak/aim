@@ -200,8 +200,34 @@ aiman apply --loadout documentation-work
 ```
 
 Plain `aiman apply` and `aiman sync` stay additive and apply the whole
-inventory. `aiman push` validates `loadouts/` (format and reference integrity)
-and publishes it alongside `skills/` and `mcp/`.
+inventory by default. `aiman push` validates `loadouts/` (format and reference
+integrity) and publishes it alongside `skills/` and `mcp/`.
+
+### Pinning a loadout
+
+`apply --loadout <name>` is one-shot: it applies the set once and remembers
+nothing, so the next `aiman sync` reverts environments to the full inventory.
+To keep `sync` applying a narrow loadout across remote updates, pin it:
+
+```bash
+aiman apply --loadout documentation-work --pin   # apply and persist as the active pin
+aiman apply --default                            # apply the full inventory, clear the pin
+aiman apply --unpin                               # clear the pin without applying anything
+```
+
+The pin is persisted state (`loadout` field in `~/.config/aim/config.yaml`),
+not a one-shot flag: once set, `aiman sync` transports the full inventory as
+always but reconciles environments to the pinned loadout's set (A/M/D) instead
+of installing everything additively, and prints `applying loadout "X" (pinned)`
+plus the delta block in normal output — not just `--dry-run`. If the pinned
+loadout no longer resolves (renamed, deleted, or the wrong repository after
+`switch`), `sync` fails with `pinned loadout "X" not found in inventory`
+instead of silently falling back to the full inventory; `synced_hash` is not
+updated. `aiman status` reports the active pin (`Pinned loadout: X` / `none`);
+`aiman switch` always clears it, even if the new repository has a loadout with
+the same name. `apply --pin`, `--default`, and `--unpin` are mutually
+exclusive with each other's target flags — see `aim-site/ru/reference/cli.md`
+for the exact conflict matrix.
 
 ## Commands
 
@@ -210,9 +236,11 @@ and publishes it alongside `skills/` and `mcp/`.
 | `aiman init <repo-url> [--path <dir>]` | Clone/connect an inventory repository and create local config |
 | `aiman switch <path>` | Switch the active inventory repository |
 | `aiman apply [--dry-run]` | Apply local inventory without Git operations |
-| `aiman apply --loadout <name> [--dry-run]` | Reconcile AI environments exactly to a named inventory subset |
+| `aiman apply --loadout <name> [--pin] [--dry-run]` | Reconcile AI environments exactly to a named inventory subset; `--pin` persists it as the active pin |
+| `aiman apply --default` | Apply the full inventory and clear the active pin |
+| `aiman apply --unpin` | Clear the active pin without applying anything |
 | `aiman push [--dry-run]` | Validate, commit, and push inventory changes |
-| `aiman sync [--dry-run] [--force]` | Fetch and apply the published inventory |
+| `aiman sync [--dry-run] [--force]` | Fetch and apply the published inventory; reconciles to the pinned loadout instead of the full inventory when a pin is active |
 | `aiman status` | Show local, remote, and environment sync state |
 | `aiman doctor` | Diagnose AI environments, skills, and MCP env values |
 
@@ -238,6 +266,10 @@ a rewrite of the core inventory model.
 - `aiman push` blocks publishing if `aim.local.yaml` is staged.
 - `aiman apply` is offline-capable and does not mutate Git state.
 - `aiman sync` updates sync markers only after the inventory is applied.
+- `aiman sync` is additive (installs/updates only, never removes) unless a
+  loadout is pinned; with an active pin it also removes environment items
+  outside the pinned set, same as `apply --loadout`. Check `aiman status` for
+  the active pin if `sync` behavior is unexpected.
 
 ## Limitations
 
@@ -250,6 +282,9 @@ a rewrite of the core inventory model.
   entirely is left behind in environments (no applied-state manifest yet), and
   a manual skill sharing a name with an inventory item outside the loadout is
   removed with it. Preview deletions with `--dry-run`.
+- The pin is a single global pointer (`~/.config/aim/config.yaml`), not
+  per-repository state: only one loadout can be pinned at a time, and
+  `aiman switch` always clears it.
 
 ## Documentation
 

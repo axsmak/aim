@@ -12,6 +12,7 @@ import (
 
 	"github.com/axsmak/aim/internal/adapter"
 	"github.com/axsmak/aim/internal/errs"
+	"github.com/axsmak/aim/internal/globalconfig"
 	"github.com/axsmak/aim/internal/loadout"
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/axsmak/aim/internal/mcp"
@@ -22,24 +23,96 @@ import (
 func newApplyCmd() *cobra.Command {
 	var dryRun bool
 	var loadoutName string
+	var pin bool
+	var setDefault bool
+	var unpin bool
 	cmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply local inventory working tree to AI environments without publishing",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateApplyFlags(loadoutName, pin, setDefault, unpin); err != nil {
+				return err
+			}
+
 			homeDir, err := os.UserHomeDir()
 			if err != nil {
 				errs.Fatalf("cannot determine home directory: %v", err)
 			}
-			workDir := resolveWorkDir(homeDir)
-			if loadoutName != "" {
-				return runApplyLoadout(loadoutName, dryRun, homeDir, workDir, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
+
+			// --unpin is a cheap, inventory-free config edit (ADR-0006 decision 3):
+			// no working tree, no environments touched.
+			if unpin {
+				return pinLoadout(homeDir, "")
 			}
+
+			workDir := resolveWorkDir(homeDir)
+
+			if setDefault {
+				if err := runApply(dryRun, homeDir, workDir, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+					return err
+				}
+				if dryRun {
+					return nil
+				}
+				// ADR-0006 decision 1: clearing the pin, never the literal "Default".
+				return pinLoadout(homeDir, "")
+			}
+
+			if loadoutName != "" {
+				if err := runApplyLoadout(loadoutName, dryRun, homeDir, workDir, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()); err != nil {
+					return err
+				}
+				if pin && !dryRun {
+					return pinLoadout(homeDir, loadoutName)
+				}
+				return nil
+			}
+
 			return runApply(dryRun, homeDir, workDir, cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be applied without making changes")
 	cmd.Flags().StringVar(&loadoutName, "loadout", "", "apply the named loadout declaratively: environments are reconciled exactly to its set within the AIM-managed namespace")
+	cmd.Flags().BoolVar(&pin, "pin", false, "requires --loadout: after a successful apply, persist it as the active pin so sync re-applies this loadout instead of the full inventory")
+	cmd.Flags().BoolVar(&setDefault, "default", false, "apply the full inventory and clear the active pin, restoring sync to full-inventory mode")
+	cmd.Flags().BoolVar(&unpin, "unpin", false, "clear the active pin without applying anything; must be used alone")
 	return cmd
+}
+
+// validateApplyFlags enforces the --pin/--default/--unpin conflict matrix
+// (ADR-0006 decision 4) before any inventory is read or runApply/runApplyLoadout
+// is dispatched. Errors use the same lowercase, unpunctuated convention as the
+// rest of the CLI's user-facing errors (errs.Fatal prints them as "error: <msg>").
+func validateApplyFlags(loadoutName string, pin, setDefault, unpin bool) error {
+	if unpin && (loadoutName != "" || pin || setDefault) {
+		return fmt.Errorf("--unpin does not apply — combine only alone")
+	}
+	if setDefault && loadoutName != "" {
+		return fmt.Errorf("--default and --loadout are mutually exclusive")
+	}
+	if setDefault && pin {
+		return fmt.Errorf("--pin is redundant with --default")
+	}
+	if pin && loadoutName == "" {
+		return fmt.Errorf("--pin requires --loadout <name>")
+	}
+	return nil
+}
+
+// pinLoadout persists name as the active pin in the global config
+// (~/.config/aim/config.yaml), preserving any existing Repo pointer. An empty
+// name clears the pin; the literal string "Default" is never written
+// (ADR-0006 decision 1).
+func pinLoadout(homeDir, name string) error {
+	cfg, err := globalconfig.Load(homeDir)
+	if err != nil {
+		return fmt.Errorf("cannot read global config: %w", err)
+	}
+	cfg.Loadout = name
+	if err := globalconfig.Save(homeDir, cfg); err != nil {
+		return fmt.Errorf("cannot save global config: %w", err)
+	}
+	return nil
 }
 
 func runApply(dryRun bool, homeDir, workDir string, in io.Reader, out, errOut io.Writer) error {

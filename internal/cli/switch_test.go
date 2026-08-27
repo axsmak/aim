@@ -152,6 +152,49 @@ func TestSwitchTildeExpansion(t *testing.T) {
 	}
 }
 
+func TestSwitchClearsPinEvenWhenNewRepoHasSameLoadoutName(t *testing.T) {
+	homeDir := t.TempDir()
+	repoDir := t.TempDir()
+	var out bytes.Buffer
+
+	// New repository is a valid AIM repo and happens to define a loadout
+	// with the same name as the currently pinned one.
+	if err := os.Mkdir(filepath.Join(repoDir, ".git"), 0755); err != nil {
+		t.Fatalf("failed to create .git: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(repoDir, "skills"), 0755); err != nil {
+		t.Fatalf("failed to create skills/: %v", err)
+	}
+	loadoutsDir := filepath.Join(repoDir, "loadouts")
+	if err := os.MkdirAll(loadoutsDir, 0755); err != nil {
+		t.Fatalf("failed to create loadouts/: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(loadoutsDir, "backend.yaml"), []byte(""), 0644); err != nil {
+		t.Fatalf("failed to create loadouts/backend.yaml: %v", err)
+	}
+
+	// Pin "backend" before switching.
+	if err := globalconfig.Save(homeDir, globalconfig.Config{Repo: "/old/repo", Loadout: "backend"}); err != nil {
+		t.Fatalf("failed to seed pin: %v", err)
+	}
+
+	if err := runSwitch(repoDir, homeDir, &out); err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	// ADR-0006, "Последствия для реализации": switch clears the pin
+	// unconditionally, even when the new repo has a loadout of the same name.
+	// Assert this explicitly rather than relying on the struct literal's
+	// zero-value behavior implicitly holding after a future refactor.
+	cfg, err := globalconfig.Load(homeDir)
+	if err != nil {
+		t.Fatalf("failed to load global config: %v", err)
+	}
+	if cfg.Loadout != "" {
+		t.Errorf("expected pin to be cleared after switch, got: %q", cfg.Loadout)
+	}
+}
+
 func TestSwitchCommandNoArgs(t *testing.T) {
 	// Test the cobra command integration: no args should call errs.Fatal
 	// We test this by verifying the command's RunE logic via root command
