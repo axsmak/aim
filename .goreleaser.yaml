@@ -64,3 +64,24 @@ brews:
       name: goreleaserbot
       email: bot@goreleaser.com
     commit_msg_template: "chore: brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+
+nfpms:
+  - id: aiman
+    ids:
+      - aiman
+    package_name: aiman
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: AIM Loadout
+    homepage: https://github.com/axsmak/aim
+    maintainer: Alexey Babiev <mak.axs@gmail.com>
+    description: Agent Inventory Manager — manage AI agent skills and MCP servers across Claude Code, Cursor, Codex
+    license: Apache-2.0
+    formats: [deb]
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/aiman/LICENSE
+      - src: README.md
+        dst: /usr/share/doc/aiman/README.md
