@@ -212,8 +212,9 @@ func (p *ReconcilePlan) DeltaLines(dryRun bool) []string {
 //   - environments excluded by loadout-level targets are not in the plan
 //     at all, so they are never touched;
 //   - the desired set is the loadout items admissible in that environment
-//     by the INTERSECTION of loadout-level and item-level targets (skills
-//     have no item-level targets, MCP items do);
+//     by the INTERSECTION of loadout-level and item-level targets (an empty
+//     item-level targets list on a skill means every discovered environment,
+//     ADR-0007 decision 2; MCP items require a non-empty targets list);
 //   - desired item absent in the environment → A; present with different
 //     content → M (sha256, like computeApplyDelta); identical → no action;
 //   - a namespace item outside the loadout that is present in the
@@ -305,9 +306,19 @@ func BuildReconcilePlan(lo loadout.Loadout, inv ReconcileInventory, envs []Recon
 		ep := &p.envs[i]
 		envName := ep.env.Adapter.Name()
 
-		// Skills: no item-level targets — every loadout skill is desired here.
-		ep.skills = desiredSkills
+		// Skills: desired set = loadout skills whose item-level targets admit
+		// this environment (empty targets = admit every discovered
+		// environment, ADR-0007 decision 2; intersection with loadout-level
+		// targets, which already filtered p.envs).
+		skillDesiredHere := make(map[string]bool)
 		for _, s := range desiredSkills {
+			if len(s.Targets) > 0 && !containsTarget(s.Targets, envName) {
+				continue
+			}
+			ep.skills = append(ep.skills, s)
+			skillDesiredHere[s.Name] = true
+		}
+		for _, s := range ep.skills {
 			inventoryHash := sha256.Sum256(s.Raw)
 			if cat := skillEnvCategory(ep.env.BaseDir, s.Name, inventoryHash); cat != "" {
 				addAction(loadout.KindSkill, s.Name, cat, envName)
@@ -323,6 +334,19 @@ func BuildReconcilePlan(lo loadout.Loadout, inv ReconcileInventory, envs []Recon
 				continue
 			}
 			removeCandidates = append(removeCandidates, name)
+		}
+		// Loadout skills not admitted into this environment by their
+		// item-level targets → D here too (ADR-0007 decision 4), symmetric
+		// with the MCP intersection below. desiredSkills only ever holds
+		// names resolved to a valid inventory file (loadoutSkillNames guards
+		// invalid files out of it and out of the namespace branch above), so
+		// this never plans deletion from an unknown targets list (ADR-0007
+		// decision 5).
+		for _, s := range desiredSkills {
+			if skillDesiredHere[s.Name] {
+				continue
+			}
+			removeCandidates = append(removeCandidates, s.Name)
 		}
 		sort.Strings(removeCandidates)
 		for _, name := range removeCandidates {
