@@ -47,6 +47,94 @@ func TestReadAll_ValidSkill(t *testing.T) {
 	if s.FilePath == "" {
 		t.Error("FilePath must not be empty")
 	}
+	if s.Targets != nil {
+		t.Errorf("Targets = %v, want nil when frontmatter has no targets key", s.Targets)
+	}
+}
+
+func TestReadAll_SkillWithTargets(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "hello.md", "---\nname: hello\ndescription: Says hello\ntargets:\n  - claude-code\n  - cursor\n---\n\n# Role\nSay hello.\n")
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("expected no invalid skills, got: %v", invalid)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	s := valid[0]
+	want := []string{"claude-code", "cursor"}
+	if len(s.Targets) != len(want) {
+		t.Fatalf("Targets = %v, want %v", s.Targets, want)
+	}
+	for i, w := range want {
+		if s.Targets[i] != w {
+			t.Errorf("Targets[%d] = %q, want %q", i, s.Targets[i], w)
+		}
+	}
+}
+
+func TestReadAll_SkillWithEmptyTargets(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "hello.md", "---\nname: hello\ndescription: Says hello\ntargets: []\n---\n\n# Role\nSay hello.\n")
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("expected no invalid skills (empty targets list is valid), got: %v", invalid)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	if len(valid[0].Targets) != 0 {
+		t.Errorf("Targets = %v, want empty", valid[0].Targets)
+	}
+}
+
+func TestReadAll_SkillWithUnknownTarget(t *testing.T) {
+	// Unknown environment names are not validated at parse time (ADR-0007, decision 7);
+	// the value is preserved as-is and the skill remains valid.
+	dir := t.TempDir()
+	writeFile(t, dir, "hello.md", "---\nname: hello\ndescription: Says hello\ntargets:\n  - claud-code\n---\n\n# Role\nSay hello.\n")
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("expected no invalid skills (unknown target names are not validated), got: %v", invalid)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	if len(valid[0].Targets) != 1 || valid[0].Targets[0] != "claud-code" {
+		t.Errorf("Targets = %v, want [claud-code]", valid[0].Targets)
+	}
+}
+
+func TestReadAll_SkillWithTargets_RawUnchanged(t *testing.T) {
+	// Raw must be preserved byte-for-byte; targets must not be stripped from it
+	// (ADR-0007, decision 10).
+	dir := t.TempDir()
+	content := "---\nname: hello\ndescription: Says hello\ntargets:\n  - claude-code\n---\n\n# Role\nSay hello.\n"
+	writeFile(t, dir, "hello.md", content)
+
+	valid, _, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	if string(valid[0].Raw) != content {
+		t.Errorf("Raw = %q, want %q", valid[0].Raw, content)
+	}
 }
 
 func TestReadAll_MissingName(t *testing.T) {
@@ -489,6 +577,50 @@ func TestWriteTo_FolderSkill_CopiesNestedRefFiles(t *testing.T) {
 	}
 	if string(got) != "# Backend\nTemplate." {
 		t.Error("nested reference file content mismatch")
+	}
+}
+
+func TestReadAll_FolderSkill_WithTargets(t *testing.T) {
+	dir := t.TempDir()
+	content := "---\nname: write-agent\ndescription: Write agent definitions\ntargets:\n  - claude-code\n---\n\n# Role\nHelps write agents.\n"
+	writeFolderSkill(t, dir, "write-agent", content)
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 0 {
+		t.Fatalf("expected no invalid skills, got: %v", invalid)
+	}
+	if len(valid) != 1 {
+		t.Fatalf("expected 1 valid skill, got %d", len(valid))
+	}
+	s := valid[0]
+	if len(s.Targets) != 1 || s.Targets[0] != "claude-code" {
+		t.Errorf("Targets = %v, want [claude-code]", s.Targets)
+	}
+}
+
+func TestReadFolderSkill_WithTargets(t *testing.T) {
+	dir := t.TempDir()
+	content := "---\nname: write-agent\ndescription: Write agent definitions\ntargets:\n  - claude-code\n  - cursor\n---\n\n# Role\nHelps write agents.\n"
+	skillDir := writeFolderSkill(t, dir, "write-agent", content)
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve != nil {
+		t.Fatalf("unexpected validation error: %v", ve)
+	}
+	want := []string{"claude-code", "cursor"}
+	if len(s.Targets) != len(want) {
+		t.Fatalf("Targets = %v, want %v", s.Targets, want)
+	}
+	for i, w := range want {
+		if s.Targets[i] != w {
+			t.Errorf("Targets[%d] = %q, want %q", i, s.Targets[i], w)
+		}
 	}
 }
 
