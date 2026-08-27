@@ -312,3 +312,52 @@ func TestApply_Unpin_NoOpWhenAlreadyUnpinned(t *testing.T) {
 		t.Errorf("expected no pin, got %q", gcfg.Loadout)
 	}
 }
+
+// ADR-0006 decision 4: dry-run has no side effects in the environments OR in
+// the config. --unpin took an early return before the dryRun flag was ever
+// read, so `apply --unpin --dry-run` used to clear the pin for real.
+func TestApply_UnpinDryRun_KeepsPin(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	if err := globalconfig.Save(fakeHome, globalconfig.Config{Repo: "/some/repo", Loadout: "docs-work"}); err != nil {
+		t.Fatalf("seed global config: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--unpin", "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gcfg, err := globalconfig.Load(fakeHome)
+	if err != nil {
+		t.Fatalf("load global config: %v", err)
+	}
+	if gcfg.Loadout != "docs-work" {
+		t.Errorf("--dry-run must not clear the pin, got %q", gcfg.Loadout)
+	}
+	if gcfg.Repo != "/some/repo" {
+		t.Errorf("expected Repo untouched, got %q", gcfg.Repo)
+	}
+	if !strings.Contains(stdout, "[dry-run]") || !strings.Contains(stdout, "docs-work") {
+		t.Errorf("expected a dry-run preview naming the pinned loadout, got: %q", stdout)
+	}
+}
+
+func TestApply_UnpinDryRun_NoPin(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--unpin", "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout, "nothing to unpin") {
+		t.Errorf("expected a nothing-to-unpin line, got: %q", stdout)
+	}
+
+	// The config file must not be created as a side effect of a dry-run.
+	if _, statErr := os.Stat(globalconfig.Path(fakeHome)); !os.IsNotExist(statErr) {
+		t.Error("--unpin --dry-run must not create the global config file")
+	}
+}
