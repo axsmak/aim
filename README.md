@@ -13,7 +13,7 @@ skills/review-code.md  ->  ~/.claude/skills/review-code/SKILL.md
                        ->  ~/.cursor/skills/review-code/SKILL.md
                        ->  ~/.codex/skills/review-code/SKILL.md
 
-mcp/context7.yaml      ->  ~/.claude/settings.json
+mcp/context7.yaml      ->  ~/.claude.json
                        ->  ~/.cursor/mcp.json
                        ->  ~/.codex/config.toml
 ```
@@ -227,7 +227,9 @@ updated. `aiman status` reports the active pin (`Pinned loadout: X` / `none`);
 `aiman switch` always clears it, even if the new repository has a loadout with
 the same name. `apply --pin`, `--default`, and `--unpin` are mutually
 exclusive with each other's target flags — see `aim-site/ru/reference/cli.md`
-for the exact conflict matrix.
+for the exact conflict matrix. `--dry-run` never writes the config: combined
+with `--pin`, `--default`, or `--unpin` it previews the change and leaves the
+pin as it is.
 
 ## Commands
 
@@ -251,7 +253,7 @@ part of the current public contract yet.
 
 | Tool | Skills | MCP |
 |------|--------|-----|
-| Claude Code | `~/.claude/skills/<name>/SKILL.md` | `~/.claude/settings.json` |
+| Claude Code | `~/.claude/skills/<name>/SKILL.md` | `~/.claude.json` |
 | Cursor | `~/.cursor/skills/<name>/SKILL.md` | `~/.cursor/mcp.json` |
 | Codex CLI | `~/.codex/skills/<name>/SKILL.md` | `~/.codex/config.toml` |
 

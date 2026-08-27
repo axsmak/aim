@@ -42,6 +42,11 @@ func newApplyCmd() *cobra.Command {
 			// --unpin is a cheap, inventory-free config edit (ADR-0006 decision 3):
 			// no working tree, no environments touched.
 			if unpin {
+				if dryRun {
+					// ADR-0006 decision 4: dry-run has no side effects in the
+					// environments OR in the config — --unpin is no exception.
+					return printUnpinDryRun(homeDir, cmd.OutOrStdout())
+				}
 				return pinLoadout(homeDir, "")
 			}
 
@@ -75,7 +80,7 @@ func newApplyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&loadoutName, "loadout", "", "apply the named loadout declaratively: environments are reconciled exactly to its set within the AIM-managed namespace")
 	cmd.Flags().BoolVar(&pin, "pin", false, "requires --loadout: after a successful apply, persist it as the active pin so sync re-applies this loadout instead of the full inventory")
 	cmd.Flags().BoolVar(&setDefault, "default", false, "apply the full inventory and clear the active pin, restoring sync to full-inventory mode")
-	cmd.Flags().BoolVar(&unpin, "unpin", false, "clear the active pin without applying anything; must be used alone")
+	cmd.Flags().BoolVar(&unpin, "unpin", false, "clear the active pin without applying anything; must be used alone (with --dry-run: preview only, the pin is kept)")
 	return cmd
 }
 
@@ -112,6 +117,24 @@ func pinLoadout(homeDir, name string) error {
 	if err := globalconfig.Save(homeDir, cfg); err != nil {
 		return fmt.Errorf("cannot save global config: %w", err)
 	}
+	return nil
+}
+
+// printUnpinDryRun previews `apply --unpin` without writing the config. It
+// reads the current pin only to name it: an unreadable global config is not
+// fatal here, since dry-run promises no side effects and has nothing to
+// report beyond what is already pinned.
+func printUnpinDryRun(homeDir string, out io.Writer) error {
+	cfg, err := globalconfig.Load(homeDir)
+	if err != nil {
+		return fmt.Errorf("cannot read global config: %w", err)
+	}
+	if cfg.Loadout == "" {
+		// ADR-0003 5.6 / 4.4: consistent "nothing to …" phrasing.
+		fmt.Fprintln(out, "[dry-run] nothing to unpin — no loadout is pinned")
+		return nil
+	}
+	fmt.Fprintf(out, "[dry-run] would unpin loadout %q — sync would go back to applying the full inventory\n", cfg.Loadout)
 	return nil
 }
 
