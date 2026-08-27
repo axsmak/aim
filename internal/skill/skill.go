@@ -15,6 +15,7 @@ type Skill struct {
 	FilePath    string
 	SourceDir   string   // non-empty for folder skills: path to skills/<name>/
 	RefFiles    []string // relative paths of reference files inside SourceDir (everything except SKILL.md)
+	Targets     []string // environments this skill is delivered to; nil or empty means all discovered environments
 }
 
 type ValidationError struct {

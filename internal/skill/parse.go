@@ -9,8 +9,9 @@ import (
 )
 
 type frontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Targets     []string `yaml:"targets"`
 }
 
 func parseFile(path string) (Skill, *ValidationError, error) {
@@ -49,6 +50,7 @@ func parseFile(path string) (Skill, *ValidationError, error) {
 		Body:        body,
 		Raw:         raw,
 		FilePath:    path,
+		Targets:     meta.Targets,
 	}, nil, nil
 }
 
@@ -118,6 +120,7 @@ func parseFolderSkill(skillMDPath string, name string) (Skill, *ValidationError,
 		FilePath:    skillMDPath,
 		SourceDir:   dir,
 		RefFiles:    refFiles,
+		Targets:     meta.Targets,
 	}, nil, nil
 }
 
@@ -161,6 +164,7 @@ func ParseRaw(raw []byte, sourcePath string) (Skill, *ValidationError, error) {
 		Description: meta.Description,
 		Body:        body,
 		Raw:         raw,
+		Targets:     meta.Targets,
 	}, nil, nil
 }
 
