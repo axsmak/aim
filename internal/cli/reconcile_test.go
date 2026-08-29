@@ -20,6 +20,18 @@ func reconcileSkillContent(name, body string) string {
 	return fmt.Sprintf("---\nname: %s\ndescription: Test skill %s\n---\n\n# Role\n%s\n", name, name, body)
 }
 
+// reconcileSkillContentWithTargets renders a skill with an item-level
+// targets list in its frontmatter (ADR-0007), mirroring reconcileMCPContent.
+func reconcileSkillContentWithTargets(name, body string, targets ...string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "---\nname: %s\ndescription: Test skill %s\ntargets:\n", name, name)
+	for _, tgt := range targets {
+		fmt.Fprintf(&sb, "  - %s\n", tgt)
+	}
+	fmt.Fprintf(&sb, "---\n\n# Role\n%s\n", body)
+	return sb.String()
+}
+
 func reconcileMCPContent(name string, targets ...string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "name: %s\ndescription: Test MCP %s\ncommand: npx\nargs: []\ntargets:\n", name, name)
@@ -35,6 +47,16 @@ func writeInventorySkill(t *testing.T, workDir, name, body string) {
 	if err := os.WriteFile(
 		filepath.Join(workDir, "skills", name+".md"),
 		[]byte(reconcileSkillContent(name, body)), 0644,
+	); err != nil {
+		t.Fatalf("write inventory skill %s: %v", name, err)
+	}
+}
+
+func writeInventorySkillWithTargets(t *testing.T, workDir, name, body string, targets ...string) {
+	t.Helper()
+	if err := os.WriteFile(
+		filepath.Join(workDir, "skills", name+".md"),
+		[]byte(reconcileSkillContentWithTargets(name, body, targets...)), 0644,
 	); err != nil {
 		t.Fatalf("write inventory skill %s: %v", name, err)
 	}
@@ -337,6 +359,111 @@ func TestReconcile_MCPTargetsIntersection(t *testing.T) {
 	}
 	if keys := mcpServerKeys(t, filepath.Join(cursorDir, "mcp.json")); !keys["ctx"] {
 		t.Error("ctx must be installed in cursor config")
+	}
+}
+
+// --- targets: intersection of loadout-level and item-level (skills, ADR-0007) ---
+
+func TestReconcile_SkillTargetsIntersection(t *testing.T) {
+	workDir, fakeHome := setupReconcileDirs(t, ".claude", ".cursor")
+	cursorDir := filepath.Join(fakeHome, ".cursor")
+
+	// Inventory skill "solo" targets only cursor; loadout has no targets of
+	// its own, and "everywhere" carries no targets at all (admits every env).
+	writeInventorySkillWithTargets(t, workDir, "solo", "Solo body.", "cursor")
+	writeInventorySkill(t, workDir, "everywhere", "Everywhere body.")
+
+	// "solo" is nevertheless installed in claude-code (e.g. from before
+	// targets were narrowed) — the intersection excludes claude-code from
+	// its desired set there, so it must be planned D in that environment.
+	installEnvSkill(t, filepath.Join(fakeHome, ".claude"), "solo", reconcileSkillContentWithTargets("solo", "Solo body.", "cursor"))
+
+	lo := parseTestLoadout(t, "name: SkillTest\ndescription: d\nitems:\n  - skill:solo\n  - skill:everywhere\n")
+	plan := buildTestPlan(t, workDir, fakeHome, lo)
+
+	var sawA, sawD bool
+	for _, act := range plan.Actions {
+		if act.Kind != loadout.KindSkill || act.Name != "solo" {
+			continue
+		}
+		switch act.Category {
+		case "A":
+			sawA = true
+			if len(act.Envs) != 1 || act.Envs[0] != "cursor" {
+				t.Errorf("A for solo must target cursor only, got %v", act.Envs)
+			}
+		case "D":
+			sawD = true
+			if len(act.Envs) != 1 || act.Envs[0] != "claude-code" {
+				t.Errorf("D for solo must target claude-code only, got %v", act.Envs)
+			}
+		}
+	}
+	if !sawA || !sawD {
+		t.Fatalf("expected both A (cursor) and D (claude-code) for solo, actions: %+v", plan.Actions)
+	}
+
+	// Empty targets ("everywhere") is desired in both admissible environments.
+	if a := findAction(plan, loadout.KindSkill, "everywhere"); a == nil || len(a.Envs) != 2 {
+		t.Errorf("everywhere must be A in both environments, got %+v", a)
+	}
+
+	// The D line must not claim "all environments" — the plan covers two
+	// environments but the action touches only one.
+	dry := strings.Join(plan.DeltaLines(true), "\n")
+	if !strings.Contains(dry, "D skills/solo.md   (would remove from claude-code)") {
+		t.Errorf("expected scoped D line for solo, got:\n%s", dry)
+	}
+	if strings.Contains(dry, "solo.md   (would remove from all environments)") {
+		t.Errorf("D line for solo must not claim all environments, got:\n%s", dry)
+	}
+
+	executeTestPlan(t, plan)
+
+	if _, err := os.Stat(filepath.Join(fakeHome, ".claude", "skills", "solo")); !os.IsNotExist(err) {
+		t.Error("solo must be removed from claude-code (item targets exclude it)")
+	}
+	if _, err := os.Stat(filepath.Join(cursorDir, "skills", "solo", "SKILL.md")); err != nil {
+		t.Error("solo must be installed in cursor")
+	}
+	if _, err := os.Stat(filepath.Join(cursorDir, "skills", "everywhere", "SKILL.md")); err != nil {
+		t.Error("everywhere must be installed in cursor")
+	}
+	if _, err := os.Stat(filepath.Join(fakeHome, ".claude", "skills", "everywhere", "SKILL.md")); err != nil {
+		t.Error("everywhere must be installed in claude-code")
+	}
+}
+
+// --- targets: guard holds across every environment, not just one (ADR-0007 decision 5) ---
+
+func TestReconcile_SkillTargetsGuardInvalidFileAcrossEnvs(t *testing.T) {
+	workDir, fakeHome := setupReconcileDirs(t, ".claude", ".cursor")
+	claudeDir := filepath.Join(fakeHome, ".claude")
+	cursorDir := filepath.Join(fakeHome, ".cursor")
+
+	// "broken" exists in the inventory but fails validation, so its targets
+	// are unknowable. The loadout asks for it explicitly and it is installed
+	// in both environments; neither must plan it for deletion.
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "broken.md"),
+		[]byte("---\nno-name: x\n---\n\nBody.\n"), 0644); err != nil {
+		t.Fatalf("write invalid skill: %v", err)
+	}
+	installEnvSkill(t, claudeDir, "broken", "installed earlier\n")
+	installEnvSkill(t, cursorDir, "broken", "installed earlier\n")
+
+	lo := parseTestLoadout(t, "name: Guard2\ndescription: d\nitems:\n  - skill:broken\n")
+	plan := buildTestPlan(t, workDir, fakeHome, lo)
+
+	if a := findAction(plan, loadout.KindSkill, "broken"); a != nil {
+		t.Errorf("loadout-referenced invalid skill must not get any action in any env, got %+v", a)
+	}
+
+	executeTestPlan(t, plan)
+	if _, err := os.Stat(filepath.Join(claudeDir, "skills", "broken", "SKILL.md")); err != nil {
+		t.Error("broken must survive in claude-code")
+	}
+	if _, err := os.Stat(filepath.Join(cursorDir, "skills", "broken", "SKILL.md")); err != nil {
+		t.Error("broken must survive in cursor")
 	}
 }
 

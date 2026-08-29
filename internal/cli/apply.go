@@ -228,6 +228,11 @@ func computeApplyDelta(validSkills []skill.Skill, adapters []adapter.Adapter, ba
 		// here. See issue #138 for a planned follow-up.
 		inventoryHash := sha256.Sum256(s.Raw)
 		for i, a := range adapters {
+			// Item-level targets (ADR-0007 decision 3): the delta can never name
+			// an environment the skill won't actually be installed into.
+			if len(s.Targets) > 0 && !containsTarget(s.Targets, a.Name()) {
+				continue
+			}
 			switch skillEnvCategory(baseDirs[i], s.Name, inventoryHash) {
 			case "A":
 				// Skill not present in this env. An entry that already exists

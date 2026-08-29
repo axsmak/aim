@@ -679,3 +679,176 @@ func TestApply_MCPTargetSubset_RealRun(t *testing.T) {
 		t.Errorf("config.toml should not be written to codex (not in targets), stat err = %v", err)
 	}
 }
+
+// --- item-level skill targets (ADR-0007), apply path ---
+
+const skillTargetsClaudeCodeContent = "---\nname: targeted-skill\ndescription: Only for claude-code\ntargets:\n  - claude-code\n---\n\n# Role\nDoes something targeted.\n"
+
+const skillTargetsUnknownEnvContent = "---\nname: typo-skill\ndescription: Targets a name that matches no adapter\ntargets:\n  - claud-code\n---\n\n# Role\nGoes nowhere.\n"
+
+// TestApply_SkillTargets_FiltersInstallation: real run installs a targeted
+// skill only into the listed environment, not into every detected one
+// (ADR-0007 decision 1/3).
+func TestApply_SkillTargets_FiltersInstallation(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+	for _, dir := range []string{".claude", ".cursor"} {
+		if err := os.MkdirAll(filepath.Join(fakeHome, dir), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "targeted-skill.md"), []byte(skillTargetsClaudeCodeContent), 0644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	if err := localconfig.Save(workDir, localconfig.Config{}); err != nil {
+		t.Fatalf("save localconfig: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	claudePath := filepath.Join(fakeHome, ".claude", "skills", "targeted-skill", "SKILL.md")
+	if _, statErr := os.Stat(claudePath); statErr != nil {
+		t.Errorf("expected targeted-skill installed in claude-code, got: %v", statErr)
+	}
+	cursorPath := filepath.Join(fakeHome, ".cursor", "skills", "targeted-skill", "SKILL.md")
+	if _, statErr := os.Stat(cursorPath); !os.IsNotExist(statErr) {
+		t.Errorf("expected targeted-skill NOT installed in cursor (not in targets), stat err = %v", statErr)
+	}
+	if !strings.Contains(stdout, "1 environment") {
+		t.Errorf("expected success line to report 1 environment, got: %q", stdout)
+	}
+}
+
+// TestApply_SkillTargets_DeltaExcludesDisallowedEnv: real-run delta must not
+// name an environment the skill's targets exclude, even though the skill is
+// new (would otherwise be "A" in every detected env).
+func TestApply_SkillTargets_DeltaExcludesDisallowedEnv(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+	for _, dir := range []string{".claude", ".cursor"} {
+		if err := os.MkdirAll(filepath.Join(fakeHome, dir), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "targeted-skill.md"), []byte(skillTargetsClaudeCodeContent), 0644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	if err := localconfig.Save(workDir, localconfig.Config{}); err != nil {
+		t.Fatalf("save localconfig: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "new in claude-code") {
+		t.Errorf("expected delta scoped to claude-code, got: %q", stdout)
+	}
+	if strings.Contains(stdout, "all environments") {
+		t.Errorf("must not say 'all environments' when cursor is excluded by targets, got: %q", stdout)
+	}
+}
+
+// TestApplyDryRun_SkillTargets_DeltaExcludesDisallowedEnv is the dry-run twin
+// of the above: computeApplyDelta is shared between real and dry-run, and
+// the AC requires both to filter (166.md).
+func TestApplyDryRun_SkillTargets_DeltaExcludesDisallowedEnv(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+	for _, dir := range []string{".claude", ".cursor"} {
+		if err := os.MkdirAll(filepath.Join(fakeHome, dir), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "skills"), 0755); err != nil {
+		t.Fatalf("mkdir skills: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "targeted-skill.md"), []byte(skillTargetsClaudeCodeContent), 0644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	if err := localconfig.Save(workDir, localconfig.Config{}); err != nil {
+		t.Fatalf("save localconfig: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir, "--dry-run")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "new in claude-code") {
+		t.Errorf("expected dry-run delta scoped to claude-code, got: %q", stdout)
+	}
+	if strings.Contains(stdout, "all environments") {
+		t.Errorf("must not say 'all environments' when cursor is excluded by targets, got: %q", stdout)
+	}
+	// AC (166.md): the dry-run summary line still lists every detected
+	// environment — only the per-skill delta lines are filtered.
+	if !strings.Contains(stdout, "cursor") {
+		t.Errorf("expected dry-run summary to still list cursor among detected environments, got: %q", stdout)
+	}
+}
+
+// TestApply_SkillTargets_UnknownEnvName_SucceedsWithNoEnvSegment covers
+// ADR-0007 decision 7 (typo in targets is not a validation error) together
+// with decision 6 (no "→ N environments" segment when nothing was reached).
+func TestApply_SkillTargets_UnknownEnvName_SucceedsWithNoEnvSegment(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "typo-skill.md"), []byte(skillTargetsUnknownEnvContent), 0644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	installedPath := filepath.Join(fakeHome, ".claude", "skills", "typo-skill", "SKILL.md")
+	if _, statErr := os.Stat(installedPath); !os.IsNotExist(statErr) {
+		t.Errorf("expected typo-skill NOT installed anywhere, stat err = %v", statErr)
+	}
+	if !strings.Contains(stdout, "applied:") {
+		t.Errorf("expected 'applied:' success line, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "1 skill") {
+		t.Errorf("expected skill count to still count the skill (1 skill), got: %q", stdout)
+	}
+	if strings.Contains(stdout, "→") {
+		t.Errorf("expected no '→ N environments' segment when the skill reached no environment, got: %q", stdout)
+	}
+}
+
+// TestApply_SkillTargets_MixedInventory_SkillCountUnaffected: a mix of a
+// targeted skill and an untargeted skill must report the full valid skill
+// count in the success line, regardless of how targets filtered delivery.
+func TestApply_SkillTargets_MixedInventory_SkillCountUnaffected(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := setupApplyWorkDir(t, fakeHome)
+
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "targeted-skill.md"), []byte(skillTargetsClaudeCodeContent), 0644); err != nil {
+		t.Fatalf("write targeted skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "skills", "test-skill.md"), []byte(validSkillContent), 0644); err != nil {
+		t.Fatalf("write untargeted skill: %v", err)
+	}
+
+	stdout, _, err := runApplyCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(stdout, "2 skills") {
+		t.Errorf("expected success line to count both valid skills (2 skills), got: %q", stdout)
+	}
+}

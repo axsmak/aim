@@ -297,10 +297,13 @@ func runLocalSync(dryRun bool, homeDir, skillsDir, mcpDir, workDir string, in io
 		return err
 	}
 
-	if res.EnvCount > 0 {
-		// ADR-0003 5.6 / 4.2: local-mode uses "synced:" not "applied:".
-		fmt.Fprintln(out, FormatSuccess("synced", "", res.SkillCount, res.MCPCount, res.EnvCount, res.MCPEnvNames))
-	}
+	// ADR-0003 5.6 / 4.2: local-mode uses "synced:" not "applied:". Printed
+	// unconditionally past the "nothing to sync" gate above, mirroring
+	// runGitSync/runLocalSyncPinned/runApply: EnvCount==0 is a valid outcome
+	// (e.g. every skill's item-level targets excluded every discovered
+	// environment, ADR-0007 decision 6) and FormatSuccess already omits the
+	// "→ N environments" segment in that case rather than needing a gate here.
+	fmt.Fprintln(out, FormatSuccess("synced", "", res.SkillCount, res.MCPCount, res.EnvCount, res.MCPEnvNames))
 
 	if res.CfgChanged {
 		if err := localconfig.Save(workDir, cfg); err != nil {
@@ -374,12 +377,21 @@ func installSkillsInto(valid []skill.Skill, cfg localconfig.Config, homeDir stri
 			fmt.Fprintf(errOut, "warning: %s not found\n", a.Name())
 			continue
 		}
+		installed := 0
 		for _, s := range valid {
+			// Item-level targets (ADR-0007 decision 2): empty/nil means "all
+			// discovered environments" (unlike MCP, where targets is required).
+			if len(s.Targets) > 0 && !containsTarget(s.Targets, a.Name()) {
+				continue
+			}
 			if installErr := a.InstallSkill(s, baseDir); installErr != nil {
 				return skillCount, envCount, fmt.Errorf("failed to install %s in %s: %w", s.Name, a.Name(), installErr)
 			}
+			installed++
 		}
-		envCount++
+		if installed > 0 {
+			envCount++
+		}
 	}
 	return len(valid), envCount, nil
 }
