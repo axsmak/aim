@@ -63,7 +63,7 @@ func (a ClaudeCodeAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw, IsFolder: true})
+		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw, IsFolder: true, SourceDir: filepath.Dir(path)})
 	}
 
 	if len(out) == 0 {

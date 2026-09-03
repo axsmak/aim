@@ -16,6 +16,12 @@ type DiscoveredSkill struct {
 	// folder-format skill's other resource files are never scanned or
 	// carried by this struct.
 	IsFolder bool
+	// SourceDir is the package directory holding SKILL.md for folder-format
+	// skills, empty for flat ones. Resource files stay on disk rather than
+	// being carried in this struct: `import skill` hands SourceDir to
+	// adder.AddSkillDir, which reuses the same package-aware read/write path
+	// as `add skill <dir>` instead of writing SKILL.md alone (issue #180).
+	SourceDir string
 }
 
 type MCPScanner interface {

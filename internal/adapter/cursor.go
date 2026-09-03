@@ -41,7 +41,7 @@ func (a CursorAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error) {
 			return nil, err
 		}
 		name := filepath.Base(filepath.Dir(path))
-		out = append(out, DiscoveredSkill{Name: name, Source: "cursor", Raw: raw, IsFolder: true})
+		out = append(out, DiscoveredSkill{Name: name, Source: "cursor", Raw: raw, IsFolder: true, SourceDir: filepath.Dir(path)})
 	}
 	return out, nil
 }
