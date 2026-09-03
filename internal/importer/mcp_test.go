@@ -1,6 +1,7 @@
 package importer_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/axsmak/aim/internal/adapter"
@@ -99,6 +100,50 @@ func TestNormalizeMCP_NonEmptyTargets(t *testing.T) {
 	}
 	if m.Targets[0] != "cursor" || m.Targets[1] != "claude-code" {
 		t.Errorf("unexpected targets: %v", m.Targets)
+	}
+}
+
+func TestNormalizeMCP_EnvVarsSortedDeterministically(t *testing.T) {
+	d := adapter.DiscoveredMCP{
+		ServerName: "my-server",
+		Source:     "cursor",
+		Command:    "node",
+		Args:       []string{"server.js"},
+		Env: map[string]string{
+			"ZETA_KEY":  "zeta-value",
+			"ALPHA_KEY": "alpha-value",
+			"MID_KEY":   "mid-value",
+		},
+	}
+
+	wantNames := []string{"ALPHA_KEY", "MID_KEY", "ZETA_KEY"}
+
+	m1, _, err := importer.NormalizeMCP(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	m2, _, err := importer.NormalizeMCP(d, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotNames1 := make([]string, len(m1.Env))
+	for i, ev := range m1.Env {
+		gotNames1[i] = ev.Name
+	}
+	gotNames2 := make([]string, len(m2.Env))
+	for i, ev := range m2.Env {
+		gotNames2[i] = ev.Name
+	}
+
+	if !reflect.DeepEqual(gotNames1, wantNames) {
+		t.Errorf("expected env var order %v, got %v", wantNames, gotNames1)
+	}
+	if !reflect.DeepEqual(gotNames1, gotNames2) {
+		t.Errorf("expected identical env var order across calls, got %v and %v", gotNames1, gotNames2)
+	}
+	if !reflect.DeepEqual(m1, m2) {
+		t.Errorf("expected identical MCP result across calls with same input, got %+v and %+v", m1, m2)
 	}
 }
 
