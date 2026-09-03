@@ -220,6 +220,30 @@ func TestImportMCP_SuccessOutput_NoSecrets(t *testing.T) {
 	}
 }
 
+func TestImportMCP_UnsupportedTransport_ErrorsWithReason(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"remote-tool": map[string]interface{}{
+			"type": "http",
+			"url":  "https://example.com/mcp",
+		},
+	})
+
+	_, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "remote-tool", "--from", "cursor")
+	if err == nil {
+		t.Fatal("expected error for unsupported transport, got nil")
+	}
+	if !strings.Contains(err.Error(), "remote-tool") || !strings.Contains(err.Error(), "stdio") {
+		t.Errorf("error = %q, want it to name the server and mention stdio-only support", err.Error())
+	}
+
+	if _, statErr := os.Stat(filepath.Join(workDir, "mcp", "remote-tool.yaml")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no mcp/remote-tool.yaml to be written, stat err = %v", statErr)
+	}
+}
+
 func TestImportMCP_IdenticalNoOp_Output(t *testing.T) {
 	fakeHome := t.TempDir()
 	workDir := t.TempDir()
