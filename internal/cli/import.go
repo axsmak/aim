@@ -86,6 +86,10 @@ func newImportSkillCmd() *cobra.Command {
 
 			found := matches[0]
 
+			if found.IsFolder {
+				return fmt.Errorf("skill %q in %s is a folder-format skill; transfer it with: aiman add skill <path-to-folder>", found.Name, found.Source)
+			}
+
 			if _, err := importer.NormalizeSkill(found); err != nil {
 				return err
 			}

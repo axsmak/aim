@@ -437,3 +437,46 @@ func TestImportMCP_NoActiveRepo_ErrorsBeforeWriting(t *testing.T) {
 		t.Error("aim.local.yaml must not be created when no repository is active")
 	}
 }
+
+// setupCodexFolderSkill writes a folder-format skill under ~/.codex/skills/<name>/,
+// with SKILL.md plus resource files (references/ and a script) that the flat-file
+// import path would otherwise silently drop.
+func setupCodexFolderSkill(t *testing.T, homeDir, skillName, skillMD string) {
+	t.Helper()
+	skillDir := filepath.Join(homeDir, ".codex", "skills", skillName)
+	referencesDir := filepath.Join(skillDir, "references")
+	if err := os.MkdirAll(referencesDir, 0755); err != nil {
+		t.Fatalf("mkdir %s: %v", referencesDir, err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMD), 0644); err != nil {
+		t.Fatalf("write SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(referencesDir, "tpl.md"), []byte("# template"), 0644); err != nil {
+		t.Fatalf("write references/tpl.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "run.sh"), []byte("#!/bin/sh\necho hi\n"), 0755); err != nil {
+		t.Fatalf("write run.sh: %v", err)
+	}
+}
+
+func TestImportSkill_FolderFormat_RefusesInsteadOfDroppingResources(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	setupCodexFolderSkill(t, fakeHome, "folder-skill", testSkillContent)
+
+	_, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex")
+	if err == nil {
+		t.Fatal("expected error for folder-format skill, got nil")
+	}
+	if !strings.Contains(err.Error(), "folder-format skill") {
+		t.Errorf("expected 'folder-format skill' error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "aiman add skill") {
+		t.Errorf("expected error to point to 'aiman add skill', got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(workDir, "skills")); !os.IsNotExist(statErr) {
+		t.Error("skills/ must not be created for a folder-format skill")
+	}
+}

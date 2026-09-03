@@ -44,7 +44,7 @@ func (a CodexAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error) {
 			return nil, err
 		}
 		name := filepath.Base(filepath.Dir(path))
-		out = append(out, DiscoveredSkill{Name: name, Source: "codex", Raw: raw})
+		out = append(out, DiscoveredSkill{Name: name, Source: "codex", Raw: raw, IsFolder: true})
 	}
 	return out, nil
 }

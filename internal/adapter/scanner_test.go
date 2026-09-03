@@ -47,6 +47,9 @@ func TestClaudeCodeAdapter_ScanSkills_TwoFiles(t *testing.T) {
 		if len(s.Raw) == 0 {
 			t.Errorf("skill %q Raw is empty", name)
 		}
+		if s.IsFolder {
+			t.Errorf("skill %q IsFolder = true, want false (flat file)", name)
+		}
 	}
 }
 
@@ -115,6 +118,9 @@ func TestCodexAdapter_ScanSkills_SubdirFormat(t *testing.T) {
 	if got[0].Source != "codex" {
 		t.Errorf("Source = %q, want codex", got[0].Source)
 	}
+	if !got[0].IsFolder {
+		t.Error("IsFolder = false, want true (subdir SKILL.md)")
+	}
 }
 
 func TestCodexAdapter_ScanSkills_DirectoryMissing(t *testing.T) {
@@ -150,6 +156,9 @@ func TestClaudeCodeAdapter_ScanSkills_SubdirFormat(t *testing.T) {
 	if got[0].Name != "my-skill" {
 		t.Errorf("Name = %q, want my-skill", got[0].Name)
 	}
+	if !got[0].IsFolder {
+		t.Error("IsFolder = false, want true (subdir SKILL.md)")
+	}
 }
 
 func TestClaudeCodeAdapter_ScanSkills_FlatTakesPrecedence(t *testing.T) {
@@ -184,5 +193,8 @@ func TestClaudeCodeAdapter_ScanSkills_FlatTakesPrecedence(t *testing.T) {
 	}
 	if string(got[0].Raw) != string(flatContent) {
 		t.Error("flat file must take precedence over subdir SKILL.md")
+	}
+	if got[0].IsFolder {
+		t.Error("IsFolder = true, want false (flat file takes precedence)")
 	}
 }

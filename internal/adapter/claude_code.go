@@ -46,7 +46,7 @@ func (a ClaudeCodeAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error)
 		}
 		name := strings.TrimSuffix(filepath.Base(path), ".md")
 		seen[name] = true
-		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw})
+		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw, IsFolder: false})
 	}
 
 	// AIM-installed format: skills/<name>/SKILL.md
@@ -63,7 +63,7 @@ func (a ClaudeCodeAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw})
+		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw, IsFolder: true})
 	}
 
 	if len(out) == 0 {

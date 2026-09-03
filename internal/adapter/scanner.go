@@ -9,6 +9,13 @@ type DiscoveredSkill struct {
 	Name   string
 	Source string // "cursor" | "claude-code" | "codex"
 	Raw    []byte
+	// IsFolder is true when the skill was found as <name>/SKILL.md in a
+	// subdirectory (a folder-format skill that may carry resources such as
+	// references/ or scripts alongside SKILL.md), and false when found as a
+	// flat <name>.md file. Raw only ever holds SKILL.md's own content — a
+	// folder-format skill's other resource files are never scanned or
+	// carried by this struct.
+	IsFolder bool
 }
 
 type MCPScanner interface {
