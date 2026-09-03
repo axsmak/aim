@@ -7,9 +7,6 @@ func Validate(m MCP) error {
 	if m.Name == "" {
 		return fmt.Errorf("name: required")
 	}
-	if m.Description == "" {
-		return fmt.Errorf("description: required")
-	}
 	if m.Command == "" {
 		return fmt.Errorf("command: required")
 	}
@@ -25,9 +22,6 @@ func Validate(m MCP) error {
 	for i, ev := range m.Env {
 		if ev.Name == "" {
 			return fmt.Errorf("env[%d].name: required", i)
-		}
-		if ev.Description == "" {
-			return fmt.Errorf("env[%d].description: required", i)
 		}
 	}
 	return nil
