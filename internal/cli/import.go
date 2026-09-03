@@ -41,7 +41,13 @@ func newImportSkillCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("cannot determine home directory: %w", err)
 			}
-			workDir := resolveWorkDir(homeDir)
+			workDir, err := requireWorkDir(homeDir)
+			if err != nil {
+				return err
+			}
+			if err := importer.ValidateItemName(name); err != nil {
+				return err
+			}
 
 			var scanner adapter.SkillScanner
 			for _, a := range adapter.Registry() {
@@ -79,6 +85,10 @@ func newImportSkillCmd() *cobra.Command {
 			}
 
 			found := matches[0]
+
+			if found.IsFolder {
+				return fmt.Errorf("skill %q in %s is a folder-format skill; transfer it with: aiman add skill <path-to-folder>", found.Name, found.Source)
+			}
 
 			if _, err := importer.NormalizeSkill(found); err != nil {
 				return err
@@ -144,7 +154,13 @@ func newImportMCPCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("cannot determine home directory: %w", err)
 			}
-			workDir := resolveWorkDir(homeDir)
+			workDir, err := requireWorkDir(homeDir)
+			if err != nil {
+				return err
+			}
+			if err := importer.ValidateItemName(name); err != nil {
+				return err
+			}
 
 			var scanner adapter.MCPScanner
 			for _, a := range adapter.Registry() {
@@ -170,6 +186,15 @@ func newImportMCPCmd() *cobra.Command {
 			}
 
 			if len(matches) == 0 {
+				if us, ok := scanner.(adapter.UnsupportedMCPScanner); ok {
+					if unsupported, uErr := us.ScanUnsupportedMCP(""); uErr == nil {
+						for _, u := range unsupported {
+							if u.Name == name {
+								return fmt.Errorf("MCP server %q uses %s; only stdio servers can be imported", name, u.Reason)
+							}
+						}
+					}
+				}
 				return fmt.Errorf("MCP server %q not found in %s", name, from)
 			}
 

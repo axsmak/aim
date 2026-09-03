@@ -206,15 +206,17 @@ env: []
 	}
 }
 
-func TestValidate_MissingDescription(t *testing.T) {
+func TestValidate_MissingDescriptionIsValid(t *testing.T) {
 	m := mcp.MCP{
 		Name:    "test",
 		Command: "npx",
 		Args:    []string{},
 		Targets: []string{"claude-code"},
-		Env:     []mcp.EnvVar{},
+		Env: []mcp.EnvVar{
+			{Name: "API_KEY"},
+		},
 	}
-	if err := mcp.Validate(m); err == nil {
-		t.Fatal("expected error for missing description")
+	if err := mcp.Validate(m); err != nil {
+		t.Fatalf("expected no error for missing description, got %v", err)
 	}
 }

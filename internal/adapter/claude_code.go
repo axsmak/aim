@@ -46,7 +46,7 @@ func (a ClaudeCodeAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error)
 		}
 		name := strings.TrimSuffix(filepath.Base(path), ".md")
 		seen[name] = true
-		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw})
+		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw, IsFolder: false})
 	}
 
 	// AIM-installed format: skills/<name>/SKILL.md
@@ -63,7 +63,7 @@ func (a ClaudeCodeAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw})
+		out = append(out, DiscoveredSkill{Name: name, Source: "claude-code", Raw: raw, IsFolder: true})
 	}
 
 	if len(out) == 0 {
@@ -108,6 +108,50 @@ func (a ClaudeCodeAdapter) ScanMCP(baseDir string) ([]DiscoveredMCP, error) {
 	for _, d := range local {
 		if !seen[d.ServerName] {
 			out = append(out, d)
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// ScanUnsupportedMCP reports MCP server entries in ~/.claude.json and
+// settings.json whose transport isn't supported (see UnsupportedMCP).
+// Entries are merged the same way ScanMCP merges DiscoveredMCP: global
+// (~/.claude.json) takes precedence over local (settings.json) by name.
+func (a ClaudeCodeAdapter) ScanUnsupportedMCP(baseDir string) ([]UnsupportedMCP, error) {
+	dir := baseDir
+	var homeDir string
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = filepath.Join(home, ".claude")
+		homeDir = home
+	} else {
+		homeDir = filepath.Dir(dir)
+	}
+
+	global, err := scanUnsupportedMCPFromJSON(filepath.Join(homeDir, ".claude.json"), "claude-code")
+	if err != nil {
+		return nil, err
+	}
+	local, err := scanUnsupportedMCPFromJSON(filepath.Join(dir, "settings.json"), "claude-code")
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool, len(global))
+	out := make([]UnsupportedMCP, 0, len(global)+len(local))
+	for _, u := range global {
+		seen[u.Name] = true
+		out = append(out, u)
+	}
+	for _, u := range local {
+		if !seen[u.Name] {
+			out = append(out, u)
 		}
 	}
 	if len(out) == 0 {

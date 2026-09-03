@@ -17,7 +17,33 @@ func NewCursorAdapter(configBaseDir string) CursorAdapter {
 func (a CursorAdapter) Name() string { return "cursor" }
 
 func (a CursorAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error) {
-	return nil, nil
+	dir := baseDir
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = filepath.Join(home, ".cursor")
+	}
+	skillsDir := filepath.Join(dir, "skills")
+	if _, err := os.Stat(skillsDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+	// Cursor only supports folder-format skills: <name>/SKILL.md
+	matches, err := filepath.Glob(filepath.Join(skillsDir, "*", "SKILL.md"))
+	if err != nil {
+		return nil, err
+	}
+	var out []DiscoveredSkill
+	for _, path := range matches {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		name := filepath.Base(filepath.Dir(path))
+		out = append(out, DiscoveredSkill{Name: name, Source: "cursor", Raw: raw, IsFolder: true})
+	}
+	return out, nil
 }
 
 func (a CursorAdapter) ScanMCP(baseDir string) ([]DiscoveredMCP, error) {
@@ -30,6 +56,20 @@ func (a CursorAdapter) ScanMCP(baseDir string) ([]DiscoveredMCP, error) {
 		dir = filepath.Join(home, ".cursor")
 	}
 	return scanMCPFromJSON(filepath.Join(dir, "mcp.json"), "cursor")
+}
+
+// ScanUnsupportedMCP reports MCP server entries in mcp.json whose transport
+// isn't supported (see UnsupportedMCP).
+func (a CursorAdapter) ScanUnsupportedMCP(baseDir string) ([]UnsupportedMCP, error) {
+	dir := baseDir
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = filepath.Join(home, ".cursor")
+	}
+	return scanUnsupportedMCPFromJSON(filepath.Join(dir, "mcp.json"), "cursor")
 }
 
 func (a CursorAdapter) Detect(homeDir string) (string, bool) {
