@@ -45,6 +45,9 @@ func newImportSkillCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := importer.ValidateItemName(name); err != nil {
+				return err
+			}
 
 			var scanner adapter.SkillScanner
 			for _, a := range adapter.Registry() {
@@ -149,6 +152,9 @@ func newImportMCPCmd() *cobra.Command {
 			}
 			workDir, err := requireWorkDir(homeDir)
 			if err != nil {
+				return err
+			}
+			if err := importer.ValidateItemName(name); err != nil {
 				return err
 			}
 

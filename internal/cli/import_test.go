@@ -275,6 +275,99 @@ func runImportCmdNoActiveRepo(t *testing.T, fakeHome, workDir string, args ...st
 	return outBuf.String(), errBuf.String(), err
 }
 
+func TestImportMCP_InvalidName_PathTraversal(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	// Mirrors the issue #176 reproduction: a Cursor mcp.json server named
+	// "../../pwned" must not be able to escape workDir via the write path.
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"../../pwned": jiraServerEntry(),
+	})
+
+	_, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "../../pwned", "--from", "cursor")
+	if err == nil {
+		t.Fatal("expected error for path-traversal item name, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid item name") {
+		t.Errorf("expected 'invalid item name' error, got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(workDir, "mcp")); !os.IsNotExist(statErr) {
+		t.Error("mcp/ must not be created for an invalid item name")
+	}
+	// The traversal target ("pwned.yaml" one level above workDir's parent)
+	// must not have been created either.
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(filepath.Dir(workDir)), "pwned.yaml")); !os.IsNotExist(statErr) {
+		t.Error("pwned.yaml must not be written outside workDir")
+	}
+}
+
+func TestImportMCP_InvalidName_Rejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		argName string
+	}{
+		{"slash", "foo/bar"},
+		{"backslash", `foo\bar`},
+		{"dotdot", ".."},
+		{"dot", "."},
+		{"absolute", "/etc/passwd"},
+		{"controlChar", "foo\x00bar"},
+		{"tooLong", strings.Repeat("a", 256)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeHome := t.TempDir()
+			workDir := t.TempDir()
+
+			_, _, err := runImportCmd(t, fakeHome, workDir, "mcp", tt.argName, "--from", "cursor")
+			if err == nil {
+				t.Fatalf("expected error for invalid item name %q, got nil", tt.argName)
+			}
+			if !strings.Contains(err.Error(), "invalid item name") {
+				t.Errorf("expected 'invalid item name' error, got: %v", err)
+			}
+
+			if _, statErr := os.Stat(filepath.Join(workDir, "mcp")); !os.IsNotExist(statErr) {
+				t.Errorf("mcp/ must not be created for invalid item name %q", tt.argName)
+			}
+		})
+	}
+}
+
+func TestImportSkill_InvalidName_Rejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		argName string
+	}{
+		{"slash", "foo/bar"},
+		{"backslash", `foo\bar`},
+		{"dotdot", ".."},
+		{"absolute", "/etc/passwd"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeHome := t.TempDir()
+			workDir := t.TempDir()
+
+			_, _, err := runImportCmd(t, fakeHome, workDir, "skill", tt.argName, "--from", "claude-code")
+			if err == nil {
+				t.Fatalf("expected error for invalid item name %q, got nil", tt.argName)
+			}
+			if !strings.Contains(err.Error(), "invalid item name") {
+				t.Errorf("expected 'invalid item name' error, got: %v", err)
+			}
+
+			if _, statErr := os.Stat(filepath.Join(workDir, "skills")); !os.IsNotExist(statErr) {
+				t.Errorf("skills/ must not be created for invalid item name %q", tt.argName)
+			}
+		})
+	}
+}
+
 func TestImportSkill_NoActiveRepo_ErrorsBeforeWriting(t *testing.T) {
 	fakeHome := t.TempDir()
 	workDir := t.TempDir()
