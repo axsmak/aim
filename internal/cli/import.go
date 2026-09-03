@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/axsmak/aim/internal/adapter"
+	"github.com/axsmak/aim/internal/adder"
 	"github.com/axsmak/aim/internal/importer"
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/spf13/cobra"
@@ -86,16 +87,50 @@ func newImportSkillCmd() *cobra.Command {
 
 			found := matches[0]
 
+			if printOnly {
+				// Folder-format skills print SKILL.md only; resources are
+				// listed by neither add nor import.
+				if found.SourceDir == "" {
+					if _, err := importer.NormalizeSkill(found); err != nil {
+						return err
+					}
+				}
+				_, err := cmd.OutOrStdout().Write(found.Raw)
+				return err
+			}
+
+			// Folder-format skill: transfer the whole package (SKILL.md plus every
+			// resource file) through the same path `aiman add skill <dir>` uses,
+			// instead of writing SKILL.md alone and dropping resources (issue #180).
+			if found.SourceDir != "" {
+				result, err := adder.AddSkillDir(found.SourceDir, adder.AddOptions{
+					WorkDir:   workDir,
+					Name:      name,
+					Overwrite: overwrite,
+				})
+				if err != nil {
+					var ce importer.ConflictError
+					if errors.As(err, &ce) {
+						return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
+					}
+					return err
+				}
+				if result.Identical {
+					fmt.Fprintf(cmd.OutOrStdout(), "up to date: skill %s · already identical\n", result.Name)
+					return nil
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "imported: skill %s · from %s\n", result.Name, from)
+				return nil
+			}
+
 			if found.IsFolder {
+				// Folder-format skill whose package directory is unknown — the
+				// scanner could not point at it, so a package transfer is
+				// impossible and writing SKILL.md alone would drop resources.
 				return fmt.Errorf("skill %q in %s is a folder-format skill; transfer it with: aiman add skill <path-to-folder>", found.Name, found.Source)
 			}
 
 			if _, err := importer.NormalizeSkill(found); err != nil {
-				return err
-			}
-
-			if printOnly {
-				_, err := cmd.OutOrStdout().Write(found.Raw)
 				return err
 			}
 

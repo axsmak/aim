@@ -459,24 +459,101 @@ func setupCodexFolderSkill(t *testing.T, homeDir, skillName, skillMD string) {
 	}
 }
 
-func TestImportSkill_FolderFormat_RefusesInsteadOfDroppingResources(t *testing.T) {
+func TestImportSkill_FolderFormat_TransfersWholePackage(t *testing.T) {
 	fakeHome := t.TempDir()
 	workDir := t.TempDir()
 
 	setupCodexFolderSkill(t, fakeHome, "folder-skill", testSkillContent)
 
-	_, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex")
-	if err == nil {
-		t.Fatal("expected error for folder-format skill, got nil")
-	}
-	if !strings.Contains(err.Error(), "folder-format skill") {
-		t.Errorf("expected 'folder-format skill' error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "aiman add skill") {
-		t.Errorf("expected error to point to 'aiman add skill', got: %v", err)
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, statErr := os.Stat(filepath.Join(workDir, "skills")); !os.IsNotExist(statErr) {
-		t.Error("skills/ must not be created for a folder-format skill")
+	want := "imported: skill folder-skill \xc2\xb7 from codex\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+
+	skillDir := filepath.Join(workDir, "skills", "folder-skill")
+	got, readErr := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
+	if readErr != nil {
+		t.Fatalf("SKILL.md not written: %v", readErr)
+	}
+	if string(got) != testSkillContent {
+		t.Errorf("SKILL.md content mismatch:\ngot:  %q\nwant: %q", got, testSkillContent)
+	}
+
+	// The resources that the flat import path used to drop silently (issue #177/#180).
+	for _, rel := range []string{filepath.Join("references", "tpl.md"), "run.sh"} {
+		if _, statErr := os.Stat(filepath.Join(skillDir, rel)); statErr != nil {
+			t.Errorf("resource %s not transferred: %v", rel, statErr)
+		}
+	}
+
+	// No stray flat file from the old code path.
+	if _, statErr := os.Stat(filepath.Join(workDir, "skills", "folder-skill.md")); !os.IsNotExist(statErr) {
+		t.Error("flat skills/folder-skill.md must not be written for a folder-format skill")
+	}
+}
+
+func TestImportSkill_FolderFormat_IdenticalNoOp(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	setupCodexFolderSkill(t, fakeHome, "folder-skill", testSkillContent)
+
+	if _, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex"); err != nil {
+		t.Fatalf("first import unexpected error: %v", err)
+	}
+
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex")
+	if err != nil {
+		t.Fatalf("second import unexpected error: %v", err)
+	}
+
+	want := "up to date: skill folder-skill \xc2\xb7 already identical\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestImportSkill_FolderFormat_ConflictNeedsOverwrite(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	setupCodexFolderSkill(t, fakeHome, "folder-skill", testSkillContent)
+
+	if _, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex"); err != nil {
+		t.Fatalf("first import unexpected error: %v", err)
+	}
+
+	// Source changes — the existing inventory copy now differs.
+	changed := "---\nname: folder-skill\ndescription: A changed test skill\n---\n\n# Changed\n\nDifferent body.\n"
+	setupCodexFolderSkill(t, fakeHome, "folder-skill", changed)
+
+	_, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex")
+	if err == nil {
+		t.Fatal("expected conflict error without --overwrite, got nil")
+	}
+	if !strings.Contains(err.Error(), "--overwrite") {
+		t.Errorf("expected error to mention --overwrite, got: %v", err)
+	}
+
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex", "--overwrite")
+	if err != nil {
+		t.Fatalf("unexpected error with --overwrite: %v", err)
+	}
+	want := "imported: skill folder-skill \xc2\xb7 from codex\n"
+	if stdout != want {
+		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+
+	got, readErr := os.ReadFile(filepath.Join(workDir, "skills", "folder-skill", "SKILL.md"))
+	if readErr != nil {
+		t.Fatalf("SKILL.md not readable after overwrite: %v", readErr)
+	}
+	if string(got) != changed {
+		t.Errorf("SKILL.md was not overwritten:\ngot:  %q\nwant: %q", got, changed)
 	}
 }
