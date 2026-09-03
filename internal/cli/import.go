@@ -41,7 +41,10 @@ func newImportSkillCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("cannot determine home directory: %w", err)
 			}
-			workDir := resolveWorkDir(homeDir)
+			workDir, err := requireWorkDir(homeDir)
+			if err != nil {
+				return err
+			}
 
 			var scanner adapter.SkillScanner
 			for _, a := range adapter.Registry() {
@@ -144,7 +147,10 @@ func newImportMCPCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("cannot determine home directory: %w", err)
 			}
-			workDir := resolveWorkDir(homeDir)
+			workDir, err := requireWorkDir(homeDir)
+			if err != nil {
+				return err
+			}
 
 			var scanner adapter.MCPScanner
 			for _, a := range adapter.Registry() {

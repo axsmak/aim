@@ -8,13 +8,21 @@ import (
 	"testing"
 
 	"github.com/axsmak/aim/internal/cli"
+	"github.com/axsmak/aim/internal/globalconfig"
 )
 
 const testSkillContent = "---\nname: test-skill\ndescription: A test skill for import tests\n---\n\n# Test Skill\n\nThis is a test skill body.\n"
 
+// runImportCmd runs `aiman import ...` with fakeHome as HOME and workDir
+// registered as the active repository in the global config, mirroring a
+// workspace that has already run `aiman init`.
 func runImportCmd(t *testing.T, fakeHome, workDir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	t.Setenv("HOME", fakeHome)
+
+	if saveErr := globalconfig.Save(fakeHome, globalconfig.Config{Repo: workDir}); saveErr != nil {
+		t.Fatalf("cannot write global config: %v", saveErr)
+	}
 
 	oldDir, cdErr := os.Getwd()
 	if cdErr != nil {
@@ -237,5 +245,78 @@ func TestImportMCP_IdenticalNoOp_Output(t *testing.T) {
 	want := "up to date: mcp simple-tool \xc2\xb7 already identical\n"
 	if stdout != want {
 		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+// runImportCmdNoActiveRepo is like runImportCmd but does NOT register workDir
+// as the active repository in the global config, simulating `aiman import`
+// run before `aiman init`.
+func runImportCmdNoActiveRepo(t *testing.T, fakeHome, workDir string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	t.Setenv("HOME", fakeHome)
+
+	oldDir, cdErr := os.Getwd()
+	if cdErr != nil {
+		t.Fatalf("cannot get working directory: %v", cdErr)
+	}
+	t.Cleanup(func() { os.Chdir(oldDir) })
+	if cdErr := os.Chdir(workDir); cdErr != nil {
+		t.Fatalf("cannot chdir to %s: %v", workDir, cdErr)
+	}
+
+	outBuf := new(bytes.Buffer)
+	errBuf := new(bytes.Buffer)
+	root := cli.NewRootCmd("test")
+	root.SetOut(outBuf)
+	root.SetErr(errBuf)
+	root.SetArgs(append([]string{"import"}, args...))
+
+	err = root.Execute()
+	return outBuf.String(), errBuf.String(), err
+}
+
+func TestImportSkill_NoActiveRepo_ErrorsBeforeWriting(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	setupClaudeSkill(t, fakeHome, "test-skill", testSkillContent)
+
+	_, _, err := runImportCmdNoActiveRepo(t, fakeHome, workDir, "skill", "test-skill", "--from", "claude-code")
+	if err == nil {
+		t.Fatal("expected error when no active repository is configured, got nil")
+	}
+	if !strings.Contains(err.Error(), "aiman init") {
+		t.Errorf("error message must point to 'aiman init', got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(workDir, "skills")); !os.IsNotExist(statErr) {
+		t.Error("skills/ must not be created when no repository is active")
+	}
+}
+
+func TestImportMCP_NoActiveRepo_ErrorsBeforeWriting(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"simple-tool": map[string]interface{}{
+			"command": "node",
+			"args":    []interface{}{"./server.js"},
+		},
+	})
+
+	_, _, err := runImportCmdNoActiveRepo(t, fakeHome, workDir, "mcp", "simple-tool", "--from", "cursor")
+	if err == nil {
+		t.Fatal("expected error when no active repository is configured, got nil")
+	}
+	if !strings.Contains(err.Error(), "aiman init") {
+		t.Errorf("error message must point to 'aiman init', got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(workDir, "mcp")); !os.IsNotExist(statErr) {
+		t.Error("mcp/ must not be created when no repository is active")
+	}
+	if _, statErr := os.Stat(filepath.Join(workDir, "aim.local.yaml")); !os.IsNotExist(statErr) {
+		t.Error("aim.local.yaml must not be created when no repository is active")
 	}
 }
