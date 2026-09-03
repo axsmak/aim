@@ -50,6 +50,26 @@ func (a CodexAdapter) ScanSkills(baseDir string) ([]DiscoveredSkill, error) {
 }
 
 func (a CodexAdapter) ScanMCP(baseDir string) ([]DiscoveredMCP, error) {
+	servers, err := readMCPServersTOML(baseDir)
+	if err != nil {
+		return nil, err
+	}
+	out, _ := splitMCPServers(servers, "codex")
+	return out, nil
+}
+
+// ScanUnsupportedMCP reports MCP server entries in config.toml whose
+// transport isn't supported (see UnsupportedMCP).
+func (a CodexAdapter) ScanUnsupportedMCP(baseDir string) ([]UnsupportedMCP, error) {
+	servers, err := readMCPServersTOML(baseDir)
+	if err != nil {
+		return nil, err
+	}
+	_, unsupported := splitMCPServers(servers, "codex")
+	return unsupported, nil
+}
+
+func readMCPServersTOML(baseDir string) (map[string]interface{}, error) {
 	dir := baseDir
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -74,49 +94,7 @@ func (a CodexAdapter) ScanMCP(baseDir string) ([]DiscoveredMCP, error) {
 	}
 
 	servers, _ := config["mcp_servers"].(map[string]interface{})
-	if len(servers) == 0 {
-		return nil, nil
-	}
-
-	out := make([]DiscoveredMCP, 0, len(servers))
-	for name, raw := range servers {
-		entry, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		cmd, _ := entry["command"].(string)
-
-		var args []string
-		if rawArgs, ok := entry["args"].([]interface{}); ok {
-			for _, a := range rawArgs {
-				if s, ok := a.(string); ok {
-					args = append(args, s)
-				}
-			}
-		}
-
-		var env map[string]string
-		if rawEnv, ok := entry["env"].(map[string]interface{}); ok && len(rawEnv) > 0 {
-			env = make(map[string]string, len(rawEnv))
-			for k, v := range rawEnv {
-				if s, ok := v.(string); ok {
-					env[k] = s
-				}
-			}
-		}
-
-		out = append(out, DiscoveredMCP{
-			ServerName: name,
-			Source:     "codex",
-			Command:    cmd,
-			Args:       args,
-			Env:        env,
-		})
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
+	return servers, nil
 }
 
 func (a CodexAdapter) Detect(homeDir string) (string, bool) {

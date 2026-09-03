@@ -12,25 +12,57 @@ import (
 // scanMCPFromJSON reads mcpServers from a JSON config file and returns DiscoveredMCP entries.
 // Used by both ClaudeCode (settings.json) and Cursor (mcp.json) which share the same format.
 func scanMCPFromJSON(configPath, source string) ([]DiscoveredMCP, error) {
+	servers, err := readMCPServersJSON(configPath)
+	if err != nil {
+		return nil, err
+	}
+	out, _ := splitMCPServers(servers, source)
+	return out, nil
+}
+
+// scanUnsupportedMCPFromJSON reads mcpServers from a JSON config file and
+// returns entries whose transport isn't supported (see UnsupportedMCP).
+func scanUnsupportedMCPFromJSON(configPath, source string) ([]UnsupportedMCP, error) {
+	servers, err := readMCPServersJSON(configPath)
+	if err != nil {
+		return nil, err
+	}
+	_, unsupported := splitMCPServers(servers, source)
+	return unsupported, nil
+}
+
+func readMCPServersJSON(configPath string) (map[string]interface{}, error) {
 	cfg, err := readJSONConfig(configPath)
 	if err != nil {
 		return nil, err
 	}
 	servers, _ := cfg["mcpServers"].(map[string]interface{})
-	return parseMCPServers(servers, source), nil
+	return servers, nil
 }
 
-func parseMCPServers(servers map[string]interface{}, source string) []DiscoveredMCP {
+// splitMCPServers parses a raw mcpServers map into stdio-backed DiscoveredMCP
+// entries and UnsupportedMCP entries for anything using a non-stdio
+// transport. An entry with neither a "command" nor a recognizable non-stdio
+// transport marker is dropped silently, matching prior behavior for
+// malformed entries.
+func splitMCPServers(servers map[string]interface{}, source string) ([]DiscoveredMCP, []UnsupportedMCP) {
 	if len(servers) == 0 {
-		return nil
+		return nil, nil
 	}
-	out := make([]DiscoveredMCP, 0, len(servers))
+	var out []DiscoveredMCP
+	var unsupported []UnsupportedMCP
 	for name, raw := range servers {
 		entry, ok := raw.(map[string]interface{})
 		if !ok {
 			continue
 		}
 		cmd, _ := entry["command"].(string)
+		if cmd == "" {
+			if reason, ok := unsupportedMCPReason(entry); ok {
+				unsupported = append(unsupported, UnsupportedMCP{Name: name, Source: source, Reason: reason})
+				continue
+			}
+		}
 
 		var args []string
 		if rawArgs, ok := entry["args"].([]interface{}); ok {
@@ -60,9 +92,32 @@ func parseMCPServers(servers map[string]interface{}, source string) []Discovered
 		})
 	}
 	if len(out) == 0 {
-		return nil
+		out = nil
 	}
-	return out
+	if len(unsupported) == 0 {
+		unsupported = nil
+	}
+	return out, unsupported
+}
+
+// unsupportedMCPReason inspects an MCP server entry that has no "command"
+// and decides whether it's a recognizable non-stdio transport (HTTP/SSE,
+// signaled by "type" and/or "url") rather than just a malformed entry. It
+// returns a human-readable reason and true when the entry should be reported
+// as UnsupportedMCP instead of silently dropped.
+func unsupportedMCPReason(entry map[string]interface{}) (string, bool) {
+	typ, _ := entry["type"].(string)
+	url, hasURL := entry["url"].(string)
+	hasURL = hasURL && url != ""
+
+	switch {
+	case typ != "" && typ != "stdio":
+		return "unsupported transport \"" + typ + "\" (only stdio servers can be imported)", true
+	case hasURL:
+		return "unsupported transport (url-based server, only stdio servers can be imported)", true
+	default:
+		return "", false
+	}
 }
 
 // installMCPJSON reads a JSON config file, merges the MCP server entry, and writes it back.

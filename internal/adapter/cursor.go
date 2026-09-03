@@ -32,6 +32,20 @@ func (a CursorAdapter) ScanMCP(baseDir string) ([]DiscoveredMCP, error) {
 	return scanMCPFromJSON(filepath.Join(dir, "mcp.json"), "cursor")
 }
 
+// ScanUnsupportedMCP reports MCP server entries in mcp.json whose transport
+// isn't supported (see UnsupportedMCP).
+func (a CursorAdapter) ScanUnsupportedMCP(baseDir string) ([]UnsupportedMCP, error) {
+	dir := baseDir
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		dir = filepath.Join(home, ".cursor")
+	}
+	return scanUnsupportedMCPFromJSON(filepath.Join(dir, "mcp.json"), "cursor")
+}
+
 func (a CursorAdapter) Detect(homeDir string) (string, bool) {
 	baseDir := a.configBaseDir
 	if baseDir == "" {
