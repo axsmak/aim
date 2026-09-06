@@ -10,6 +10,7 @@ import (
 
 	"github.com/axsmak/aim/internal/adapter"
 	"github.com/axsmak/aim/internal/adder"
+	"github.com/axsmak/aim/internal/fsutil"
 	"github.com/axsmak/aim/internal/importer"
 	"github.com/axsmak/aim/internal/localconfig"
 	"github.com/spf13/cobra"
@@ -152,7 +153,7 @@ func newImportSkillCmd() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(destPath, found.Raw, 0644); err != nil {
+			if err := fsutil.WriteFile(destPath, found.Raw, 0644); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "imported: skill %s · from %s\n", found.Name, from)
@@ -291,7 +292,7 @@ func newImportMCPCmd() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(destPath, yamlBytes, 0644); err != nil {
+			if err := fsutil.WriteFile(destPath, yamlBytes, 0644); err != nil {
 				return err
 			}
 

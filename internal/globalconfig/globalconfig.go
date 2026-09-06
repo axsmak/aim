@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/axsmak/aim/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -46,5 +47,5 @@ func Save(homeDir string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(Path(homeDir), data, 0644)
+	return fsutil.WriteFile(Path(homeDir), data, 0644)
 }

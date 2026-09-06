@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/axsmak/aim/internal/fsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -52,7 +53,7 @@ func Save(workDir string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(workDir, "aim.local.yaml"), data, 0644)
+	return fsutil.WriteFile(filepath.Join(workDir, "aim.local.yaml"), data, 0644)
 }
 
 func Load(workDir string) (Config, error) {

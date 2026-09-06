@@ -7,6 +7,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/axsmak/aim/internal/fsutil"
 	"github.com/axsmak/aim/internal/mcp"
 	"github.com/axsmak/aim/internal/skill"
 )
@@ -163,7 +164,7 @@ func installMCPTOML(configPath string, m mcp.MCP, envValues map[string]string) e
 	if err := toml.NewEncoder(&buf).Encode(config); err != nil {
 		return err
 	}
-	return os.WriteFile(configPath, buf.Bytes(), 0644)
+	return fsutil.WriteFile(configPath, buf.Bytes(), 0644)
 }
 
 // removeMCPTOML deletes the mcp_servers entry keyed by name from a TOML config
@@ -194,5 +195,5 @@ func removeMCPTOML(configPath, name string) error {
 	if err := toml.NewEncoder(&buf).Encode(config); err != nil {
 		return err
 	}
-	return os.WriteFile(configPath, buf.Bytes(), 0644)
+	return fsutil.WriteFile(configPath, buf.Bytes(), 0644)
 }
