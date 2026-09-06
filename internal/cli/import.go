@@ -225,7 +225,9 @@ func newImportMCPCmd() *cobra.Command {
 					if unsupported, uErr := us.ScanUnsupportedMCP(""); uErr == nil {
 						for _, u := range unsupported {
 							if u.Name == name {
-								return fmt.Errorf("MCP server %q uses %s; only stdio servers can be imported", name, u.Reason)
+								// Reason already spells out the transport and the
+								// stdio-only rule — don't repeat the tail here.
+								return fmt.Errorf("MCP server %q: %s", name, u.Reason)
 							}
 						}
 					}
