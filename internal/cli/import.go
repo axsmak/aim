@@ -237,11 +237,18 @@ func newImportMCPCmd() *cobra.Command {
 
 			found := deduplicateMCP(matches)
 			if found == nil {
+				// deduplicateMCP only returns nil when the same server name maps to
+				// entries with different Command/Args within one adapter's ScanMCP.
+				// Every adapter today guarantees name uniqueness (see the comment on
+				// deduplicateMCP below), so this is defense-in-depth against a future
+				// adapter breaking that contract. importer.AmbiguousError.Error()
+				// mentions --name, which import mcp doesn't have — build our own
+				// message instead of returning that error as-is.
 				sources := make([]string, len(matches))
 				for i, m := range matches {
 					sources[i] = m.Source
 				}
-				return importer.AmbiguousError{Name: name, Sources: sources}
+				return fmt.Errorf("MCP server %q: adapter %s returned conflicting entries %v for the same server name (internal adapter contract violation)", name, from, sources)
 			}
 
 			var resolvedTargets []string
