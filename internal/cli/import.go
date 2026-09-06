@@ -261,6 +261,11 @@ func newImportMCPCmd() *cobra.Command {
 				return err
 			}
 
+			if printOnly {
+				_, err := cmd.OutOrStdout().Write(yamlBytes)
+				return err
+			}
+
 			destPath := filepath.Join(workDir, "mcp", name+".yaml")
 
 			// If ConflictError message in conflict.go changes, update this import-specific hint too.
@@ -273,11 +278,6 @@ func newImportMCPCmd() *cobra.Command {
 				if errors.As(err, &ce) {
 					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
 				}
-				return err
-			}
-
-			if printOnly {
-				_, err := cmd.OutOrStdout().Write(yamlBytes)
 				return err
 			}
 
