@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/axsmak/aim/internal/fsutil"
 	"github.com/axsmak/aim/internal/mcp"
 )
 
@@ -192,5 +193,5 @@ func writeJSONConfig(path string, cfg map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(data, '\n'), 0644)
+	return fsutil.WriteFile(path, append(data, '\n'), 0644)
 }

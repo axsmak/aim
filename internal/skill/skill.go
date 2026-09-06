@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/axsmak/aim/internal/fsutil"
 )
 
 type Skill struct {
@@ -36,11 +38,16 @@ func WriteTo(s Skill, baseDir string) error {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(destDir, "SKILL.md"), s.Raw, 0644); err != nil {
+	if err := fsutil.WriteFile(filepath.Join(destDir, "SKILL.md"), s.Raw, 0644); err != nil {
 		return err
 	}
 	for _, ref := range s.RefFiles {
-		data, err := os.ReadFile(filepath.Join(s.SourceDir, ref))
+		srcPath := filepath.Join(s.SourceDir, ref)
+		info, err := os.Stat(srcPath)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			return err
 		}
@@ -49,7 +56,10 @@ func WriteTo(s Skill, baseDir string) error {
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(dest, data, 0644); err != nil {
+		// fsutil.WriteFile always renames a freshly chmod'd file into place,
+		// so an existing dest picks up perm's mode too — no separate Chmod
+		// needed for the "dest already exists" case.
+		if err := fsutil.WriteFile(dest, data, info.Mode().Perm()); err != nil {
 			return err
 		}
 	}

@@ -557,3 +557,23 @@ func TestImportSkill_FolderFormat_ConflictNeedsOverwrite(t *testing.T) {
 		t.Errorf("SKILL.md was not overwritten:\ngot:  %q\nwant: %q", got, changed)
 	}
 }
+
+func TestImportSkill_FolderFormat_PreservesExecutableBit(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	setupCodexFolderSkill(t, fakeHome, "folder-skill", testSkillContent)
+
+	if _, _, err := runImportCmd(t, fakeHome, workDir, "skill", "folder-skill", "--from", "codex"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	destPath := filepath.Join(workDir, "skills", "folder-skill", "run.sh")
+	info, statErr := os.Stat(destPath)
+	if statErr != nil {
+		t.Fatalf("run.sh not transferred: %v", statErr)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("mode = %o, want %o — executable bit must survive import skill --from <env>", info.Mode().Perm(), 0755)
+	}
+}

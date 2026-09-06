@@ -1,11 +1,24 @@
 package skill
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+)
+
+// Default limits on folder-format skill package resources (ADR-0008a, п.4).
+// A package exceeding any of these is rejected outright rather than
+// silently truncated — the caller sees a ValidationError with the exact
+// reason, not a partial RefFiles list.
+const (
+	maxSkillPackageFiles     = 200
+	maxSkillPackageFileSize  = 1 << 20 // 1 MB
+	maxSkillPackageTotalSize = 5 << 20 // 5 MB
+	maxSkillPackageDepth     = 5       // nested directories below the skill root
 )
 
 type frontmatter struct {
@@ -56,7 +69,10 @@ func parseFile(path string) (Skill, *ValidationError, error) {
 
 // parseFolderSkill parses a folder-format skill from its SKILL.md file.
 // The skill name is taken from the directory name, not from frontmatter.
-// Returns a ValidationError (not a system error) when required fields are missing.
+// Returns a ValidationError (not a system error) when required fields are
+// missing, or when the resource walk below rejects the package — either
+// way the caller (ReadAll) can mark this one skill invalid without failing
+// the read of the rest of the inventory.
 func parseFolderSkill(skillMDPath string, name string) (Skill, *ValidationError, error) {
 	raw, err := readFile(skillMDPath)
 	if err != nil {
@@ -89,8 +105,20 @@ func parseFolderSkill(skillMDPath string, name string) (Skill, *ValidationError,
 	// SKILL.md, recursively, as paths relative to the skill directory. Skills
 	// commonly keep templates in subdirectories (e.g. references/*.tpl.md);
 	// a non-recursive listing silently dropped them (issue #145).
+	//
+	// The walk enforces default resource limits (ADR-0008a, п.4): this path
+	// now also runs over directories from other AI environments during
+	// `import skill` (issue #180), not just directories the user names
+	// directly with `add skill <dir>`. filepath.WalkDir uses Lstat semantics
+	// and does not itself follow symlinks, so the entry's type is known
+	// without an extra stat call — a symlink or other special file (device,
+	// socket, FIFO) is rejected here, before anything reads through it.
 	dir := filepath.Dir(skillMDPath)
 	var refFiles []string
+	var vErr *ValidationError
+	var fileCount int
+	var totalSize int64
+
 	walkErr := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -105,11 +133,50 @@ func parseFolderSkill(skillMDPath string, name string) (Skill, *ValidationError,
 		if rel == "SKILL.md" {
 			return nil
 		}
+
+		if d.Type()&fs.ModeSymlink != 0 {
+			vErr = &ValidationError{FilePath: path, Field: "resource", Message: "symlink not allowed in skill package"}
+			return fs.SkipAll
+		}
+		if !d.Type().IsRegular() {
+			vErr = &ValidationError{FilePath: path, Field: "resource", Message: "special file (device, socket, or FIFO) not allowed in skill package"}
+			return fs.SkipAll
+		}
+
+		if depth := strings.Count(rel, string(filepath.Separator)); depth > maxSkillPackageDepth {
+			vErr = &ValidationError{FilePath: path, Field: "resource", Message: fmt.Sprintf("nested deeper than %d directories", maxSkillPackageDepth)}
+			return fs.SkipAll
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() > maxSkillPackageFileSize {
+			vErr = &ValidationError{FilePath: path, Field: "resource", Message: fmt.Sprintf("exceeds %d byte file size limit", maxSkillPackageFileSize)}
+			return fs.SkipAll
+		}
+
+		fileCount++
+		if fileCount > maxSkillPackageFiles {
+			vErr = &ValidationError{FilePath: dir, Field: "resource", Message: fmt.Sprintf("exceeds %d file limit", maxSkillPackageFiles)}
+			return fs.SkipAll
+		}
+
+		totalSize += info.Size()
+		if totalSize > maxSkillPackageTotalSize {
+			vErr = &ValidationError{FilePath: dir, Field: "resource", Message: fmt.Sprintf("exceeds %d byte total package size limit", maxSkillPackageTotalSize)}
+			return fs.SkipAll
+		}
+
 		refFiles = append(refFiles, rel)
 		return nil
 	})
 	if walkErr != nil {
 		return Skill{}, nil, walkErr
+	}
+	if vErr != nil {
+		return Skill{}, vErr, nil
 	}
 
 	return Skill{

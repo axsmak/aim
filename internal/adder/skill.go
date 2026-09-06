@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/axsmak/aim/internal/fsutil"
 	"github.com/axsmak/aim/internal/importer"
 	"github.com/axsmak/aim/internal/skill"
 )
@@ -39,7 +40,7 @@ func addSkill(raw []byte, opts AddOptions) (AddResult, error) {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return AddResult{}, err
 	}
-	if err := os.WriteFile(destPath, raw, 0644); err != nil {
+	if err := fsutil.WriteFile(destPath, raw, 0644); err != nil {
 		return AddResult{}, err
 	}
 	return AddResult{Name: name, Identical: false}, nil
