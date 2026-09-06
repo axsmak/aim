@@ -40,7 +40,12 @@ func WriteTo(s Skill, baseDir string) error {
 		return err
 	}
 	for _, ref := range s.RefFiles {
-		data, err := os.ReadFile(filepath.Join(s.SourceDir, ref))
+		srcPath := filepath.Join(s.SourceDir, ref)
+		info, err := os.Stat(srcPath)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(srcPath)
 		if err != nil {
 			return err
 		}
@@ -49,7 +54,14 @@ func WriteTo(s Skill, baseDir string) error {
 		if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(dest, data, 0644); err != nil {
+		perm := info.Mode().Perm()
+		if err := os.WriteFile(dest, data, perm); err != nil {
+			return err
+		}
+		// os.WriteFile's perm only applies on O_CREATE; an existing dest
+		// keeps its old mode unless explicitly chmod'd, so a re-run over a
+		// previously written file would otherwise leave a stale mode behind.
+		if err := os.Chmod(dest, perm); err != nil {
 			return err
 		}
 	}

@@ -790,3 +790,98 @@ func TestReadAll_FolderSkill_OverLimit_DoesNotBlockOthers(t *testing.T) {
 		t.Fatalf("expected good-skill to remain valid despite bad-skill exceeding limits, got %v", valid)
 	}
 }
+
+func TestWriteTo_FolderSkill_PreservesExecutableBit(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "run-agent", validFolderSkillContent)
+	scriptPath := writeFile(t, skillDir, "run.sh", "#!/bin/sh\necho hi\n")
+	if err := os.Chmod(scriptPath, 0755); err != nil {
+		t.Fatalf("chmod setup: %v", err)
+	}
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil || ve != nil {
+		t.Fatalf("setup: ReadFolderSkill failed: err=%v ve=%v", err, ve)
+	}
+
+	baseDir := t.TempDir()
+	if err := skill.WriteTo(s, baseDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	destPath := filepath.Join(baseDir, "skills", "run-agent", "run.sh")
+	info, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatalf("run.sh not written: %v", err)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("mode = %o, want %o", info.Mode().Perm(), 0755)
+	}
+}
+
+func TestWriteTo_FolderSkill_ExistingDest_BecomesExecutable(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "run-agent", validFolderSkillContent)
+	scriptPath := writeFile(t, skillDir, "run.sh", "#!/bin/sh\necho hi\n")
+	if err := os.Chmod(scriptPath, 0755); err != nil {
+		t.Fatalf("chmod setup: %v", err)
+	}
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil || ve != nil {
+		t.Fatalf("setup: ReadFolderSkill failed: err=%v ve=%v", err, ve)
+	}
+
+	baseDir := t.TempDir()
+	destPath := filepath.Join(baseDir, "skills", "run-agent", "run.sh")
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		t.Fatalf("mkdir setup: %v", err)
+	}
+	if err := os.WriteFile(destPath, []byte("stale"), 0644); err != nil {
+		t.Fatalf("write stale dest: %v", err)
+	}
+
+	if err := skill.WriteTo(s, baseDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	info, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatalf("run.sh missing after WriteTo: %v", err)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("mode = %o, want %o (existing dest must pick up the new executable bit)", info.Mode().Perm(), 0755)
+	}
+}
+
+func TestWriteTo_FolderSkill_ExistingDest_LosesExecutableBit(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "run-agent", validFolderSkillContent)
+	writeFile(t, skillDir, "run.sh", "#!/bin/sh\necho hi\n") // 0644, non-executable source
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil || ve != nil {
+		t.Fatalf("setup: ReadFolderSkill failed: err=%v ve=%v", err, ve)
+	}
+
+	baseDir := t.TempDir()
+	destPath := filepath.Join(baseDir, "skills", "run-agent", "run.sh")
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		t.Fatalf("mkdir setup: %v", err)
+	}
+	if err := os.WriteFile(destPath, []byte("stale"), 0755); err != nil {
+		t.Fatalf("write stale executable dest: %v", err)
+	}
+
+	if err := skill.WriteTo(s, baseDir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	info, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatalf("run.sh missing after WriteTo: %v", err)
+	}
+	if info.Mode().Perm() != 0644 {
+		t.Errorf("mode = %o, want %o (existing dest must lose the executable bit when source is non-executable)", info.Mode().Perm(), 0644)
+	}
+}
