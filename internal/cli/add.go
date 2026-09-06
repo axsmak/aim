@@ -33,7 +33,10 @@ func newAddSkillCmd() *cobra.Command {
 			if err != nil {
 				errs.Fatalf("cannot determine home directory: %v", err)
 			}
-			workDir := resolveWorkDir(homeDir)
+			workDir, err := requireWorkDir(homeDir)
+			if err != nil {
+				return err
+			}
 
 			opts := adder.AddOptions{
 				WorkDir:   workDir,
@@ -111,7 +114,10 @@ func newAddMCPCmd() *cobra.Command {
 			if err != nil {
 				errs.Fatalf("cannot determine home directory: %v", err)
 			}
-			workDir := resolveWorkDir(homeDir)
+			workDir, err := requireWorkDir(homeDir)
+			if err != nil {
+				return err
+			}
 
 			src := args[0]
 			var r *os.File

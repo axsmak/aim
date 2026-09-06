@@ -156,6 +156,86 @@ func TestImportMCP_DryRun(t *testing.T) {
 	}
 }
 
+// TestImportMCP_DryRun_PrintsBeforeConflictCheck verifies that --print prints the
+// normalized YAML from the current source unconditionally, even when
+// mcp/<name>.yaml already exists on disk with different content — it must not
+// fail with a conflict error, and must not touch the file on disk.
+func TestImportMCP_DryRun_PrintsBeforeConflictCheck(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"jira": jiraServerEntry(),
+	})
+
+	// First import: write the file with the original command.
+	if _, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "jira", "--from", "cursor"); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	destPath := filepath.Join(workDir, "mcp", "jira.yaml")
+	before, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("read mcp/jira.yaml after first import: %v", err)
+	}
+
+	// Change the source so a plain re-import would conflict.
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"jira": map[string]interface{}{
+			"command": "uvx",
+			"args":    []interface{}{"jira-mcp"},
+		},
+	})
+
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "jira", "--from", "cursor", "--print")
+	if err != nil {
+		t.Fatalf("--print must not fail on conflicting disk state, got: %v", err)
+	}
+	if !strings.Contains(stdout, "uvx") {
+		t.Errorf("--print stdout must reflect the new source command 'uvx', got: %q", stdout)
+	}
+	if strings.Contains(stdout, "--overwrite") {
+		t.Errorf("--print must not print a conflict message, got: %q", stdout)
+	}
+
+	// mcp/jira.yaml on disk must be untouched by --print.
+	after, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("read mcp/jira.yaml after --print: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("--print must not modify mcp/jira.yaml on disk")
+	}
+}
+
+// TestImportMCP_DryRun_IdenticalStillPrints verifies that --print prints the YAML
+// even when mcp/<name>.yaml on disk is already identical to the source — it must
+// not short-circuit into the "up to date: ... identical" no-op message.
+func TestImportMCP_DryRun_IdenticalStillPrints(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	writeCursorMCPConfig(t, fakeHome, map[string]interface{}{
+		"jira": jiraServerEntry(),
+	})
+
+	// First import: write the file.
+	if _, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "jira", "--from", "cursor"); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+
+	// Source unchanged: mcp/jira.yaml on disk is now identical to the source.
+	stdout, _, err := runImportCmd(t, fakeHome, workDir, "mcp", "jira", "--from", "cursor", "--print")
+	if err != nil {
+		t.Fatalf("--print unexpected error: %v", err)
+	}
+	if strings.Contains(stdout, "up to date") {
+		t.Errorf("--print must not print the identical no-op message, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "jira") || !strings.Contains(stdout, "npx") {
+		t.Errorf("--print must print the normalized YAML content, got: %q", stdout)
+	}
+}
+
 // TestImportMCP_TargetsAll verifies that --targets all sets all adapter names in the descriptor.
 func TestImportMCP_TargetsAll(t *testing.T) {
 	fakeHome := t.TempDir()

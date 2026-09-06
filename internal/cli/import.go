@@ -237,11 +237,18 @@ func newImportMCPCmd() *cobra.Command {
 
 			found := deduplicateMCP(matches)
 			if found == nil {
+				// deduplicateMCP only returns nil when the same server name maps to
+				// entries with different Command/Args within one adapter's ScanMCP.
+				// Every adapter today guarantees name uniqueness (see the comment on
+				// deduplicateMCP below), so this is defense-in-depth against a future
+				// adapter breaking that contract. importer.AmbiguousError.Error()
+				// mentions --name, which import mcp doesn't have — build our own
+				// message instead of returning that error as-is.
 				sources := make([]string, len(matches))
 				for i, m := range matches {
 					sources[i] = m.Source
 				}
-				return importer.AmbiguousError{Name: name, Sources: sources}
+				return fmt.Errorf("MCP server %q: adapter %s returned conflicting entries %v for the same server name (internal adapter contract violation)", name, from, sources)
 			}
 
 			var resolvedTargets []string
@@ -261,6 +268,11 @@ func newImportMCPCmd() *cobra.Command {
 				return err
 			}
 
+			if printOnly {
+				_, err := cmd.OutOrStdout().Write(yamlBytes)
+				return err
+			}
+
 			destPath := filepath.Join(workDir, "mcp", name+".yaml")
 
 			// If ConflictError message in conflict.go changes, update this import-specific hint too.
@@ -273,11 +285,6 @@ func newImportMCPCmd() *cobra.Command {
 				if errors.As(err, &ce) {
 					return fmt.Errorf("%s already exists with different content; use --overwrite to replace", ce.Path)
 				}
-				return err
-			}
-
-			if printOnly {
-				_, err := cmd.OutOrStdout().Write(yamlBytes)
 				return err
 			}
 
