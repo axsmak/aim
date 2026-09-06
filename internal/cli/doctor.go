@@ -125,7 +125,10 @@ func runDoctor(homeDir, workDir, skillsDir, mcpDir string, cfg localconfig.Confi
 	}
 
 	// MCP env section
-	mcpItems, _ := mcp.ParseDir(mcpDir)
+	mcpItems, mcpErrs := mcp.ParseDir(mcpDir)
+	for _, e := range mcpErrs {
+		issues = append(issues, fmt.Sprintf("• %s", e))
+	}
 	if len(mcpItems) > 0 {
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "=== MCP Environment Variables ===")

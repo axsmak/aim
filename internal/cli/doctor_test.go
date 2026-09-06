@@ -210,6 +210,60 @@ func TestDoctor_MCPEnv_Missing(t *testing.T) {
 	}
 }
 
+func TestDoctor_MCPParseError_SurfacedInIssues(t *testing.T) {
+	fakeHome := t.TempDir()
+	if err := os.Mkdir(filepath.Join(fakeHome, ".claude"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	workDir := t.TempDir()
+	skillsDir := filepath.Join(workDir, "skills")
+	mcpDir := filepath.Join(workDir, "mcp")
+	if err := os.Mkdir(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(mcpDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsDir, "test-skill.md"), []byte(validSkillContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Valid MCP item, should still show up in the env section.
+	validMCPContent := "name: my-server\ndescription: test\ncommand: npx\nargs: []\ntargets:\n  - claude-code\nenv:\n  - name: API_KEY\n    description: API key\n    required: true\n"
+	if err := os.WriteFile(filepath.Join(mcpDir, "my-server.yaml"), []byte(validMCPContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Invalid MCP item: missing required "command" field.
+	brokenMCPPath := filepath.Join(mcpDir, "broken.yaml")
+	brokenMCPContent := "name: broken-server\ndescription: test\nargs: []\ntargets:\n  - claude-code\n"
+	if err := os.WriteFile(brokenMCPPath, []byte(brokenMCPContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	localCfg := "mcp_env:\n  my-server.API_KEY: secret\n"
+	if err := os.WriteFile(filepath.Join(workDir, "aim.local.yaml"), []byte(localCfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, err := runDoctorCmd(t, fakeHome, workDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// runDoctor resolves the workDir-relative mcp path (e.g. "mcp/broken.yaml"), not the
+	// absolute filesystem path, so match on the relative path mcp.ParseDir reports.
+	relBrokenPath := filepath.Join("mcp", filepath.Base(brokenMCPPath))
+	issuesIdx := strings.Index(stdout, "=== Issues ===")
+	if issuesIdx == -1 {
+		t.Fatalf("expected Issues section, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout[issuesIdx:], relBrokenPath) {
+		t.Errorf("expected broken.yaml path (%s) inside Issues section, got:\n%s", relBrokenPath, stdout)
+	}
+	// Valid MCP item should still appear in the env section, unaffected by the invalid one.
+	if !strings.Contains(stdout, "✓ my-server › API_KEY") {
+		t.Errorf("expected valid MCP item still rendered in env section, got:\n%s", stdout)
+	}
+}
+
 func TestDoctor_NoMCPDir_NoSection(t *testing.T) {
 	fakeHome := t.TempDir()
 	if err := os.Mkdir(filepath.Join(fakeHome, ".claude"), 0755); err != nil {
