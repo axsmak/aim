@@ -8,9 +8,44 @@ import (
 	"testing"
 
 	"github.com/axsmak/aim/internal/cli"
+	"github.com/axsmak/aim/internal/globalconfig"
 )
 
+// runAddCmd runs `aiman add ...` with fakeHome as HOME and workDir registered
+// as the active repository in the global config, mirroring a workspace that
+// has already run `aiman init`.
 func runAddCmd(t *testing.T, fakeHome, workDir string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	t.Setenv("HOME", fakeHome)
+
+	if saveErr := globalconfig.Save(fakeHome, globalconfig.Config{Repo: workDir}); saveErr != nil {
+		t.Fatalf("cannot write global config: %v", saveErr)
+	}
+
+	oldDir, cdErr := os.Getwd()
+	if cdErr != nil {
+		t.Fatalf("cannot get working directory: %v", cdErr)
+	}
+	t.Cleanup(func() { os.Chdir(oldDir) })
+	if cdErr := os.Chdir(workDir); cdErr != nil {
+		t.Fatalf("cannot chdir to %s: %v", workDir, cdErr)
+	}
+
+	outBuf := new(bytes.Buffer)
+	errBuf := new(bytes.Buffer)
+	root := cli.NewRootCmd("test")
+	root.SetOut(outBuf)
+	root.SetErr(errBuf)
+	root.SetArgs(append([]string{"add"}, args...))
+
+	err = root.Execute()
+	return outBuf.String(), errBuf.String(), err
+}
+
+// runAddCmdNoActiveRepo is like runAddCmd but does NOT register workDir as
+// the active repository in the global config, simulating `aiman add` run
+// before `aiman init`.
+func runAddCmdNoActiveRepo(t *testing.T, fakeHome, workDir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	t.Setenv("HOME", fakeHome)
 
@@ -329,5 +364,53 @@ func TestAddMCP_SuccessOutput_IdenticalNoOp(t *testing.T) {
 	want := "up to date: mcp jira \xc2\xb7 already identical\n"
 	if stdout != want {
 		t.Errorf("stdout mismatch:\ngot:  %q\nwant: %q", stdout, want)
+	}
+}
+
+func TestAddSkill_NoActiveRepo_ErrorsBeforeWriting(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+
+	skillContent := "---\nname: my-skill\ndescription: A test skill\n---\n\n# Role\nDoes something useful.\n"
+	srcFile := filepath.Join(t.TempDir(), "my-skill.md")
+	if err := os.WriteFile(srcFile, []byte(skillContent), 0644); err != nil {
+		t.Fatalf("write source skill: %v", err)
+	}
+
+	_, _, err := runAddCmdNoActiveRepo(t, fakeHome, workDir, "skill", srcFile)
+	if err == nil {
+		t.Fatal("expected error when no active repository is configured, got nil")
+	}
+	if !strings.Contains(err.Error(), "aiman init") {
+		t.Errorf("error message must point to 'aiman init', got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(workDir, "skills")); !os.IsNotExist(statErr) {
+		t.Error("skills/ must not be created when no repository is active")
+	}
+}
+
+// TestAddMCP_NoActiveRepo_ErrorsBeforeWriting mirrors issue #178's original
+// finding for mcp: without an active repository, neither mcp/<name>.yaml nor
+// aim.local.yaml (which would carry the real env.*.value secret) may be
+// written to the current directory.
+func TestAddMCP_NoActiveRepo_ErrorsBeforeWriting(t *testing.T) {
+	fakeHome := t.TempDir()
+	workDir := t.TempDir()
+	src := writeMCPFixture(t, mcpFixtureWithEnv)
+
+	_, _, err := runAddCmdNoActiveRepo(t, fakeHome, workDir, "mcp", src)
+	if err == nil {
+		t.Fatal("expected error when no active repository is configured, got nil")
+	}
+	if !strings.Contains(err.Error(), "aiman init") {
+		t.Errorf("error message must point to 'aiman init', got: %v", err)
+	}
+
+	if _, statErr := os.Stat(filepath.Join(workDir, "mcp")); !os.IsNotExist(statErr) {
+		t.Error("mcp/ must not be created when no repository is active")
+	}
+	if _, statErr := os.Stat(filepath.Join(workDir, "aim.local.yaml")); !os.IsNotExist(statErr) {
+		t.Error("aim.local.yaml must not be created when no repository is active")
 	}
 }
