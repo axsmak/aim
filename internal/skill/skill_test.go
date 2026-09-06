@@ -1,8 +1,11 @@
 package skill_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 
 	"github.com/axsmak/aim/internal/skill"
@@ -640,5 +643,150 @@ func TestReadAll_FolderSkill_BothFlatAndFolder(t *testing.T) {
 	}
 	if len(valid) != 2 {
 		t.Errorf("expected 2 valid skills, got %d", len(valid))
+	}
+}
+
+func TestReadFolderSkill_TooManyFiles_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "big-skill", validFolderSkillContent)
+	for i := 0; i < 201; i++ {
+		writeFile(t, skillDir, fmt.Sprintf("file-%03d.txt", i), "x")
+	}
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve == nil {
+		t.Fatal("expected ValidationError for package exceeding file count limit, got nil")
+	}
+	if s.RefFiles != nil {
+		t.Errorf("RefFiles = %v, want nil on rejection", s.RefFiles)
+	}
+}
+
+func TestReadFolderSkill_FileTooLarge_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "big-file-skill", validFolderSkillContent)
+	big := make([]byte, 1<<20+1)
+	writeFile(t, skillDir, "huge.bin", string(big))
+
+	_, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve == nil {
+		t.Fatal("expected ValidationError for file exceeding size limit, got nil")
+	}
+}
+
+func TestReadFolderSkill_TotalSizeTooLarge_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "heavy-skill", validFolderSkillContent)
+	chunk := make([]byte, 900*1024)
+	for i := 0; i < 6; i++ {
+		writeFile(t, skillDir, fmt.Sprintf("chunk-%d.bin", i), string(chunk))
+	}
+
+	_, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve == nil {
+		t.Fatal("expected ValidationError for package exceeding total size limit, got nil")
+	}
+}
+
+func TestReadFolderSkill_TooDeep_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "deep-skill", validFolderSkillContent)
+	deepRel := filepath.Join("a", "b", "c", "d", "e", "f", "file.txt")
+	writeNestedFile(t, skillDir, deepRel, "x")
+
+	_, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve == nil {
+		t.Fatal("expected ValidationError for resource nested past the depth limit, got nil")
+	}
+}
+
+func TestReadFolderSkill_Symlink_Rejected_NotRead(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "symlink-skill", validFolderSkillContent)
+	outside := writeFile(t, dir, "secret.txt", "sensitive content outside the skill package")
+	linkPath := filepath.Join(skillDir, "link.txt")
+	if err := os.Symlink(outside, linkPath); err != nil {
+		t.Fatalf("os.Symlink: %v", err)
+	}
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve == nil {
+		t.Fatal("expected ValidationError for symlink in skill package, got nil")
+	}
+	if s.RefFiles != nil {
+		t.Errorf("RefFiles = %v, want nil — symlink target must not be read into the package", s.RefFiles)
+	}
+}
+
+func TestReadFolderSkill_SpecialFile_Rejected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on windows")
+	}
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "fifo-skill", validFolderSkillContent)
+	fifoPath := filepath.Join(skillDir, "pipe")
+	if err := syscall.Mkfifo(fifoPath, 0644); err != nil {
+		t.Fatalf("syscall.Mkfifo: %v", err)
+	}
+
+	_, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve == nil {
+		t.Fatal("expected ValidationError for special file (FIFO) in skill package, got nil")
+	}
+}
+
+func TestReadFolderSkill_WithinLimits_Unaffected(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeFolderSkill(t, dir, "normal-skill", validFolderSkillContent)
+	writeFile(t, skillDir, "notes.md", "# Notes")
+	writeNestedFile(t, skillDir, filepath.Join("references", "tpl.md"), "# Template")
+
+	s, ve, err := skill.ReadFolderSkill(filepath.Join(skillDir, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if ve != nil {
+		t.Fatalf("unexpected validation error for package within limits: %v", ve)
+	}
+	if len(s.RefFiles) != 2 {
+		t.Errorf("RefFiles = %v, want 2 entries", s.RefFiles)
+	}
+}
+
+func TestReadAll_FolderSkill_OverLimit_DoesNotBlockOthers(t *testing.T) {
+	dir := t.TempDir()
+	writeFolderSkill(t, dir, "good-skill", validFolderSkillContent)
+	badDir := writeFolderSkill(t, dir, "bad-skill", "---\nname: bad-skill\ndescription: Bad\n---\n\n# Role\nBody.\n")
+	for i := 0; i < 201; i++ {
+		writeFile(t, badDir, fmt.Sprintf("file-%03d.txt", i), "x")
+	}
+
+	valid, invalid, err := skill.ReadAll(dir)
+	if err != nil {
+		t.Fatalf("unexpected system error: %v", err)
+	}
+	if len(invalid) != 1 {
+		t.Fatalf("expected exactly 1 invalid skill, got %d: %v", len(invalid), invalid)
+	}
+	if len(valid) != 1 || valid[0].Name != "good-skill" {
+		t.Fatalf("expected good-skill to remain valid despite bad-skill exceeding limits, got %v", valid)
 	}
 }
